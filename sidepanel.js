@@ -118,6 +118,12 @@ function createNoteElement(note) {
   titleInput.addEventListener("input", () => {
     updateNote(note.id, { title: titleInput.value }, { debounce: true });
   });
+  titleInput.addEventListener("focus", () => {
+    titleInput.spellcheck = true;
+  });
+  titleInput.addEventListener("blur", () => {
+    titleInput.spellcheck = false;
+  });
   titleInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
       e.preventDefault();
@@ -128,6 +134,12 @@ function createNoteElement(note) {
   contentArea.addEventListener("input", () => {
     autoResize(contentArea);
     updateNote(note.id, { content: contentArea.value }, { debounce: true });
+  });
+  contentArea.addEventListener("focus", () => {
+    contentArea.spellcheck = true;
+  });
+  contentArea.addEventListener("blur", () => {
+    contentArea.spellcheck = false;
   });
 
   handle.addEventListener("dragstart", (e) => {
