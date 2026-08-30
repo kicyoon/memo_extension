@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>메모장</title>
+<link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>📝 메모장</h1>
+    <button id="add-note-btn" class="add-btn" title="새 메모 추가">+ 새 메모</button>
+  </header>
+
+  <main id="notes-list" class="notes-list"></main>
+
+  <p id="empty-state" class="empty-state" hidden>
+    메모가 없습니다.<br />위의 "+ 새 메모" 버튼을 눌러 시작하세요.
+  </p>
+
+  <template id="note-template">
+    <section class="note">
+      <div class="note-header">
+        <span class="note-handle" draggable="true" title="드래그하여 순서 변경">⠿</span>
+        <input class="note-title" type="text" placeholder="제목 없음" maxlength="80" />
+        <button class="note-delete" title="메모 삭제">✕</button>
+      </div>
+      <textarea class="note-content" placeholder="메모를 입력하세요..."></textarea>
+      <div class="note-footer">
+        <div class="color-swatches"></div>
+        <span class="note-date"></span>
+      </div>
+    </section>
+  </template>
+
+  <script src="sidepanel.js"></script>
+</body>
+</html>
