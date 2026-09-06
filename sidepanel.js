@@ -99,6 +99,14 @@ function flushNote(id, patch) {
   updateNote(id, patch, { debounce: false });
 }
 
+// DOM 값을 건드리지 않고, 이미 input 이벤트로 메모리에 반영된 값을
+// 그대로 즉시 저장한다. IME 조합 중 blur가 발생한 경우처럼 DOM의
+// 현재 값을 신뢰할 수 없을 때 사용한다.
+function flushPersist(id) {
+  clearTimeout(saveTimers.get(id));
+  persist();
+}
+
 function autoResize(textarea) {
   textarea.style.height = "auto";
   textarea.style.height = textarea.scrollHeight + "px";
@@ -120,6 +128,14 @@ function createNoteElement(note) {
   contentArea.value = note.content;
   dateEl.textContent = formatDate(note.updatedAt);
 
+  let titleComposing = false;
+  titleInput.addEventListener("compositionstart", () => {
+    titleComposing = true;
+  });
+  titleInput.addEventListener("compositionend", () => {
+    titleComposing = false;
+    flushNote(note.id, { title: titleInput.value });
+  });
   titleInput.addEventListener("input", () => {
     updateNote(note.id, { title: titleInput.value }, { debounce: true });
   });
@@ -128,9 +144,15 @@ function createNoteElement(note) {
   });
   titleInput.addEventListener("blur", () => {
     titleInput.spellcheck = false;
-    // IME 조합 중 포커스가 빠져나가면 마지막 글자에 대한 input 이벤트가
-    // 발생하지 않을 수 있으므로, blur 시점의 실제 값을 즉시 강제 저장한다.
-    flushNote(note.id, { title: titleInput.value });
+    if (titleComposing) {
+      // 사이드패널 밖으로 포커스가 나가면서 IME 조합이 커밋되지 않고
+      // 취소된 경우: DOM 값이 이미 훼손되었을 수 있으므로 다시 읽지
+      // 않고, 마지막 input 이벤트가 저장해둔 값을 그대로 즉시 저장한다.
+      flushPersist(note.id);
+      titleComposing = false;
+    } else {
+      flushNote(note.id, { title: titleInput.value });
+    }
   });
   titleInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
@@ -139,6 +161,15 @@ function createNoteElement(note) {
     }
   });
 
+  let contentComposing = false;
+  contentArea.addEventListener("compositionstart", () => {
+    contentComposing = true;
+  });
+  contentArea.addEventListener("compositionend", () => {
+    contentComposing = false;
+    autoResize(contentArea);
+    flushNote(note.id, { content: contentArea.value });
+  });
   contentArea.addEventListener("input", () => {
     autoResize(contentArea);
     updateNote(note.id, { content: contentArea.value }, { debounce: true });
@@ -148,7 +179,12 @@ function createNoteElement(note) {
   });
   contentArea.addEventListener("blur", () => {
     contentArea.spellcheck = false;
-    flushNote(note.id, { content: contentArea.value });
+    if (contentComposing) {
+      flushPersist(note.id);
+      contentComposing = false;
+    } else {
+      flushNote(note.id, { content: contentArea.value });
+    }
   });
 
   handle.addEventListener("dragstart", (e) => {
