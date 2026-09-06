@@ -94,6 +94,11 @@ function updateNote(id, patch, { debounce = false } = {}) {
   );
 }
 
+function flushNote(id, patch) {
+  clearTimeout(saveTimers.get(id));
+  updateNote(id, patch, { debounce: false });
+}
+
 function autoResize(textarea) {
   textarea.style.height = "auto";
   textarea.style.height = textarea.scrollHeight + "px";
@@ -123,6 +128,9 @@ function createNoteElement(note) {
   });
   titleInput.addEventListener("blur", () => {
     titleInput.spellcheck = false;
+    // IME 조합 중 포커스가 빠져나가면 마지막 글자에 대한 input 이벤트가
+    // 발생하지 않을 수 있으므로, blur 시점의 실제 값을 즉시 강제 저장한다.
+    flushNote(note.id, { title: titleInput.value });
   });
   titleInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
@@ -140,6 +148,7 @@ function createNoteElement(note) {
   });
   contentArea.addEventListener("blur", () => {
     contentArea.spellcheck = false;
+    flushNote(note.id, { content: contentArea.value });
   });
 
   handle.addEventListener("dragstart", (e) => {
@@ -257,5 +266,13 @@ listEl.addEventListener("drop", (e) => {
 });
 
 addBtn.addEventListener("click", addNote);
+
+// 사이드패널이 열리는 슬라이드 인 애니메이션 도중에는 실제 너비가 아직
+// 확정되지 않아 scrollHeight 기반 높이 계산이 부정확할 수 있다.
+// 패널 크기가 바뀔 때마다 모든 노트의 높이를 다시 계산해 보정한다.
+const panelResizeObserver = new ResizeObserver(() => {
+  listEl.querySelectorAll(".note-content").forEach(autoResize);
+});
+panelResizeObserver.observe(document.body);
 
 loadNotes();
