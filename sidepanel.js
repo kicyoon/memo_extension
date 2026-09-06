@@ -40,7 +40,24 @@ function persist() {
   chrome.storage.local.set({ [STORAGE_KEY]: notes });
 }
 
+// 화면(DOM)에 떠 있는 값과 메모리의 notes가 어긋났는지 본다. blur 이후
+// 안전망으로 render()를 부를지 판단하는 용도 — 어긋난 게 없으면 굳이 DOM을
+// 새로 만들지 않는다(불필요하게 커서/포커스를 날리지 않기 위해).
+function domDivergesFromNotes() {
+  return [...listEl.querySelectorAll(".note")].some((noteEl) => {
+    const n = notes.find((x) => x.id === noteEl.dataset.id);
+    if (!n) return true;
+    const t = noteEl.querySelector(".note-title");
+    const c = noteEl.querySelector(".note-content");
+    return (t && t.value !== n.title) || (c && c.value !== n.content);
+  });
+}
+
+// 포커스가 패널 밖(브라우저 탭 등)으로 나가도 document.activeElement는
+// 그대로 그 input에 남아 있다. hasFocus()를 같이 봐야 "지금 이 패널 안에서
+// 편집 중"인지 판별된다. 이게 없으면 blur 뒤 복구용 render가 통째로 걸러진다.
 function isEditingAnyNote() {
+  if (!document.hasFocus()) return false;
   const active = document.activeElement;
   return !!(active && active.closest && active.closest(".note"));
 }
@@ -83,24 +100,15 @@ function updateNote(id, patch, { debounce = false } = {}) {
   if (!note) return;
   Object.assign(note, patch, { updatedAt: Date.now() });
 
+  clearTimeout(saveTimers.get(id));
   if (!debounce) {
     persist();
     return;
   }
-  clearTimeout(saveTimers.get(id));
   saveTimers.set(
     id,
     setTimeout(() => persist(), 300)
   );
-}
-
-// 디바운스를 기다리지 않고 현재 메모리(notes 배열)의 값을 즉시 저장한다.
-// blur 시점에 DOM 값을 다시 읽지 않는 이유는, IME 조합이 취소되며
-// 마지막 글자가 지워진 DOM 값으로 이미 올바르게 저장된 값을 덮어쓰는
-// 것을 방지하기 위함이다.
-function flushPersist(id) {
-  clearTimeout(saveTimers.get(id));
-  persist();
 }
 
 function autoResize(textarea) {
@@ -108,55 +116,66 @@ function autoResize(textarea) {
   textarea.style.height = textarea.scrollHeight + "px";
 }
 
-// 사이드패널 문서와 브라우저 탭(웹페이지) 문서는 서로 다른 프레임이라,
-// 조합 중(IME) 상태에서 패널 밖(탭 콘텐츠 등)으로 포커스가 이동하면
-// 크롬이 compositionend/input 이벤트 없이 조용히 조합 문자를 취소하는
-// 경우가 있다. compositionupdate로 조합 중인 문자열을 계속 기록해두고,
-// blur 시점까지 compositionend가 오지 않았다면(취소됨) 기록해둔 값을
-// 직접 복원해서 저장한다.
+// blur가 발생하는 바로 그 순간의 el.value는 이미 조합 중이던 글자까지
+// 정확히 포함하고 있다. 문제는 그 이후다 — 패널 밖으로 포커스가 나가면
+// 브라우저가 뒤늦게 조합 정리를 위해 compositionend와 deleteContentBackward를
+// 발생시켜 DOM 값을 건드린다. 그래서 blur 시점의 값을 그대로 신뢰해 저장하고,
+// 그 뒤 (포커스 없는 상태에서) 도착하는 변경은 화면만 되돌린다.
+//
+// 되돌릴 기준값으로 note[field]를 쓰면 안 된다. persist()마다
+// storage.onChanged가 notes 배열을 통째로 새 객체로 갈아치우기 때문에,
+// 이 클로저가 붙들고 있는 note는 곧 고아가 되어 마지막 render 시점 값에
+// 얼어붙는다. 그 죽은 값으로 되돌리면 멀쩡한 글자가 지워진다(원래 버그).
+// 그래서 정상 입력마다 직접 갱신하는 lastGoodValue를 기준으로 삼는다.
 function bindEditableField(el, note, field, onAfterChange) {
-  let composing = false;
-  let beforeValue = "";
-  let startIndex = 0;
-  let lastData = "";
+  let focused = false;
+  let lastGoodValue = el.value;
 
-  el.addEventListener("compositionstart", () => {
-    composing = true;
-    beforeValue = el.value;
-    startIndex = el.selectionStart;
-    lastData = "";
+  el.addEventListener("focus", () => {
+    focused = true;
+    lastGoodValue = el.value;
   });
 
-  el.addEventListener("compositionupdate", (e) => {
-    lastData = e.data || "";
-  });
+  // 포커스가 없는 상태에서 도착한 변경을 화면에서 되돌린다.
+  const revertIfStray = () => {
+    if (el.value === lastGoodValue) return;
+    el.value = lastGoodValue;
+    if (onAfterChange) onAfterChange();
+  };
 
   el.addEventListener("compositionend", () => {
-    composing = false;
+    if (!focused) {
+      revertIfStray();
+      return;
+    }
     if (onAfterChange) onAfterChange();
-    updateNote(note.id, { [field]: el.value }, { debounce: false });
+    lastGoodValue = el.value;
+    updateNote(note.id, { [field]: el.value });
   });
 
   el.addEventListener("input", (e) => {
+    if (!focused) {
+      revertIfStray();
+      return;
+    }
     if (onAfterChange) onAfterChange();
     if (e.inputType === "deleteCompositionText") return;
+    lastGoodValue = el.value;
     updateNote(note.id, { [field]: el.value }, { debounce: true });
   });
 
   el.addEventListener("blur", () => {
-    if (!composing) {
-      flushPersist(note.id);
-      return;
-    }
-    let finalValue = el.value;
-    if (lastData && finalValue === beforeValue) {
-      finalValue =
-        beforeValue.slice(0, startIndex) + lastData + beforeValue.slice(startIndex);
-      el.value = finalValue;
-      if (onAfterChange) onAfterChange();
-    }
-    composing = false;
-    updateNote(note.id, { [field]: finalValue }, { debounce: false });
+    focused = false;
+    // blur 시점의 el.value는 조합 중이던 글자까지 온전히 담고 있다(실측).
+    lastGoodValue = el.value;
+    updateNote(note.id, { [field]: el.value });
+    // 조합 정리로 DOM이 건드려진 건 위 revertIfStray가 되돌린다. 이 rAF는
+    // 그걸로도 안 잡힌 어긋남이 남았을 때만 도는 마지막 안전망이다.
+    // 어긋남이 없으면 render를 건너뛴다 — 다른 앱에 갔다 왔을 뿐인데
+    // DOM을 새로 만들어 커서를 날려버리지 않기 위해서다.
+    requestAnimationFrame(() => {
+      if (!isEditingAnyNote() && domDivergesFromNotes()) render();
+    });
   });
 }
 
@@ -259,7 +278,10 @@ function render() {
     listEl.appendChild(createNoteElement(note));
   });
 
-  if (focusedId && focusedField) {
+  // 패널이 포커스를 갖고 있지 않은데 focus()를 부르면, 사용자가 브라우저
+  // 쪽으로 옮겨간 포커스를 도로 뺏어온다. activeElement는 창 밖으로 나간
+  // 뒤에도 남아 있으므로 hasFocus()로 한 번 더 걸러야 한다.
+  if (focusedId && focusedField && document.hasFocus()) {
     const selector = `.note[data-id="${focusedId}"] .note-${focusedField}`;
     const el = listEl.querySelector(selector);
     if (el) {
