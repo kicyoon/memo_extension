@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "포스트잇 메모장",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "브라우저 오른쪽에 고정되는 포스트잇 스타일 메모장",
   "permissions": ["storage", "sidePanel"],
   "background": {
