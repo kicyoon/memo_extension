@@ -108,6 +108,58 @@ function autoResize(textarea) {
   textarea.style.height = textarea.scrollHeight + "px";
 }
 
+// 사이드패널 문서와 브라우저 탭(웹페이지) 문서는 서로 다른 프레임이라,
+// 조합 중(IME) 상태에서 패널 밖(탭 콘텐츠 등)으로 포커스가 이동하면
+// 크롬이 compositionend/input 이벤트 없이 조용히 조합 문자를 취소하는
+// 경우가 있다. compositionupdate로 조합 중인 문자열을 계속 기록해두고,
+// blur 시점까지 compositionend가 오지 않았다면(취소됨) 기록해둔 값을
+// 직접 복원해서 저장한다.
+function bindEditableField(el, note, field, onAfterChange) {
+  let composing = false;
+  let beforeValue = "";
+  let startIndex = 0;
+  let lastData = "";
+
+  el.addEventListener("compositionstart", () => {
+    composing = true;
+    beforeValue = el.value;
+    startIndex = el.selectionStart;
+    lastData = "";
+  });
+
+  el.addEventListener("compositionupdate", (e) => {
+    lastData = e.data || "";
+  });
+
+  el.addEventListener("compositionend", () => {
+    composing = false;
+    if (onAfterChange) onAfterChange();
+    updateNote(note.id, { [field]: el.value }, { debounce: false });
+  });
+
+  el.addEventListener("input", (e) => {
+    if (onAfterChange) onAfterChange();
+    if (e.inputType === "deleteCompositionText") return;
+    updateNote(note.id, { [field]: el.value }, { debounce: true });
+  });
+
+  el.addEventListener("blur", () => {
+    if (!composing) {
+      flushPersist(note.id);
+      return;
+    }
+    let finalValue = el.value;
+    if (lastData && finalValue === beforeValue) {
+      finalValue =
+        beforeValue.slice(0, startIndex) + lastData + beforeValue.slice(startIndex);
+      el.value = finalValue;
+      if (onAfterChange) onAfterChange();
+    }
+    composing = false;
+    updateNote(note.id, { [field]: finalValue }, { debounce: false });
+  });
+}
+
 function createNoteElement(note) {
   const fragment = template.content.cloneNode(true);
   const noteEl = fragment.querySelector(".note");
@@ -124,22 +176,11 @@ function createNoteElement(note) {
   contentArea.value = note.content;
   dateEl.textContent = formatDate(note.updatedAt);
 
-  titleInput.addEventListener("input", (e) => {
-    // 포커스가 패널 밖으로 나가며 IME 조합이 취소될 때 브라우저가
-    // 조합 중이던 글자를 지우면서 이 타입의 input 이벤트를 별도로
-    // 발생시킨다. 이 이벤트를 그대로 반영하면 직전에 정상적으로
-    // 저장된 값(마지막 글자 포함)이 지워진 값으로 덮어써지므로 무시한다.
-    if (e.inputType === "deleteCompositionText") return;
-    updateNote(note.id, { title: titleInput.value }, { debounce: true });
-  });
   titleInput.addEventListener("focus", () => {
     titleInput.spellcheck = true;
   });
   titleInput.addEventListener("blur", () => {
     titleInput.spellcheck = false;
-    // DOM 값을 다시 읽지 않고, 이미 input 이벤트로 메모리에 반영된
-    // 값을 그대로 즉시 저장한다 (디바운스 대기 없이).
-    flushPersist(note.id);
   });
   titleInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
@@ -147,19 +188,15 @@ function createNoteElement(note) {
       contentArea.focus();
     }
   });
+  bindEditableField(titleInput, note, "title");
 
-  contentArea.addEventListener("input", (e) => {
-    autoResize(contentArea);
-    if (e.inputType === "deleteCompositionText") return;
-    updateNote(note.id, { content: contentArea.value }, { debounce: true });
-  });
   contentArea.addEventListener("focus", () => {
     contentArea.spellcheck = true;
   });
   contentArea.addEventListener("blur", () => {
     contentArea.spellcheck = false;
-    flushPersist(note.id);
   });
+  bindEditableField(contentArea, note, "content", () => autoResize(contentArea));
 
   handle.addEventListener("dragstart", (e) => {
     e.dataTransfer.effectAllowed = "move";
