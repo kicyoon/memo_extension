@@ -8,13 +8,22 @@
 <body>
   <header class="app-header">
     <h1>📝 메모장</h1>
-    <button id="add-note-btn" class="add-btn" title="새 메모 추가">+ 새 메모</button>
+    <div class="header-actions">
+      <button id="theme-btn" class="btn btn-icon btn-quiet" type="button" aria-label="테마 변경"></button>
+      <button id="add-note-btn" class="btn btn-icon btn-primary" type="button"
+              title="새 메모 추가" aria-label="새 메모 추가">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+             stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 5.5v13M5.5 12h13" />
+        </svg>
+      </button>
+    </div>
   </header>
 
   <main id="notes-list" class="notes-list"></main>
 
   <p id="empty-state" class="empty-state" hidden>
-    메모가 없습니다.<br />위의 "+ 새 메모" 버튼을 눌러 시작하세요.
+    메모가 없습니다.<br />오른쪽 위 + 버튼을 눌러 시작하세요.
   </p>
 
   <template id="note-template">
@@ -24,7 +33,12 @@
         <input class="note-title" type="text" placeholder="제목 없음" maxlength="80" spellcheck="false" />
         <button class="note-delete" title="메모 삭제">✕</button>
       </div>
-      <textarea class="note-content" placeholder="메모를 입력하세요..." spellcheck="false"></textarea>
+      <!-- textarea가 아니라 contenteditable인 이유: Ctrl+B로 일부 글자만 굵게
+           만들려면 서식을 담을 수 있는 요소여야 한다. placeholder 속성이 없으므로
+           data-placeholder + .is-blank 클래스로 흉내 낸다(sidepanel.css 참고). -->
+      <div class="note-content" contenteditable="true" role="textbox" aria-multiline="true"
+           aria-label="메모 내용" spellcheck="false"
+           data-placeholder="메모를 입력하세요..."></div>
       <div class="note-footer">
         <div class="color-swatches"></div>
         <span class="note-date"></span>

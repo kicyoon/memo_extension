@@ -1,5 +1,49 @@
 :root {
   color-scheme: light;
+
+  --bg: #eef0f3;
+  --fg: #2b2b2b;
+  --header-bg: #ffffff;
+  --header-border: #dfe1e5;
+  --accent: #4a6cf7;
+  --accent-hover: #3a5ce0;
+  --muted: #8a8f98;
+  --btn-quiet-bg: #f4f5f7;
+  --btn-quiet-border: #d9dce1;
+  --btn-quiet-fg: #4a4f57;
+  --btn-quiet-hover: #e9ebef;
+  --btn-quiet-hover-border: #c7cbd2;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #1b1d20;
+  --fg: #e4e6e8;
+  --header-bg: #25282c;
+  --header-border: #34373c;
+  --accent: #5b7bff;
+  --accent-hover: #6f8bff;
+  --muted: #888e96;
+  --btn-quiet-bg: #2e3238;
+  --btn-quiet-border: #3e434a;
+  --btn-quiet-fg: #c8ccd2;
+  --btn-quiet-hover: #383d44;
+  --btn-quiet-hover-border: #4b515a;
+}
+
+/* JS가 저장된 설정을 읽어 data-theme을 찍기 전 아주 짧은 순간, 시스템이
+   다크면 흰 화면이 번쩍인다. 그 순간에만 적용되는 최소한의 보정이다.
+   (이때는 메모 목록이 아직 비어 있으므로 배경/헤더 색만 맞추면 된다.) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --bg: #1b1d20;
+    --fg: #e4e6e8;
+    --header-bg: #25282c;
+    --header-border: #34373c;
+    --accent: #5b7bff;
+  }
 }
 
 * {
@@ -9,8 +53,8 @@
 body {
   margin: 0;
   font-family: "Segoe UI", "Malgun Gothic", sans-serif;
-  background: #eef0f3;
-  color: #2b2b2b;
+  background: var(--bg);
+  color: var(--fg);
   display: flex;
   flex-direction: column;
   height: 100vh;
@@ -21,29 +65,77 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 12px 14px;
-  background: #ffffff;
-  border-bottom: 1px solid #dfe1e5;
+  background: var(--header-bg);
+  border-bottom: 1px solid var(--header-border);
   flex: 0 0 auto;
 }
 
 .app-header h1 {
   font-size: 16px;
   margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.add-btn {
-  border: none;
-  background: #4a6cf7;
-  color: #fff;
-  font-size: 13px;
-  padding: 7px 12px;
-  border-radius: 6px;
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+/* 두 버튼은 한 쌍으로 읽혀야 한다. 높이·모서리·아이콘 굵기를 공유하고,
+   역할 차이(주요 동작 / 보조 설정)만 색의 무게로 구분한다. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: inherit;
   cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
 }
 
-.add-btn:hover {
-  background: #3a5ce0;
+.btn svg {
+  flex: 0 0 auto;
+  display: block;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: var(--accent-hover);
+}
+
+/* 아이콘만 들어가는 버튼은 정사각형으로 맞춘다(높이와 동일). */
+.btn-icon {
+  width: 30px;
+  padding: 0;
+}
+
+.btn-quiet {
+  background: var(--btn-quiet-bg);
+  border-color: var(--btn-quiet-border);
+  color: var(--btn-quiet-fg);
+}
+
+.btn-quiet:hover {
+  background: var(--btn-quiet-hover);
+  border-color: var(--btn-quiet-hover-border);
 }
 
 .notes-list {
@@ -57,24 +149,58 @@ body {
 
 .empty-state {
   text-align: center;
-  color: #8a8f98;
+  color: var(--muted);
   font-size: 13px;
   line-height: 1.6;
   margin-top: 40px;
   padding: 0 20px;
 }
 
+/* 메모 위의 글자·테두리 색은 테마가 아니라 그 메모의 배경색이 정한다.
+   배경이 어두운지를 JS가 재서 .note-on-dark를 붙여 주므로, 라이트 테마에서
+   진한 색을 직접 골라도 글자가 묻히지 않는다. */
 .note {
+  --note-text: #2b2b2b;
+  --note-shadow: 0 3px 6px rgba(0, 0, 0, 0.15);
+  --note-shadow-focus: 0 4px 10px rgba(0, 0, 0, 0.22);
+  --note-fold: rgba(0, 0, 0, 0.12);
+  --note-handle: rgba(0, 0, 0, 0.4);
+  --note-date: rgba(0, 0, 0, 0.45);
+  --note-placeholder: rgba(0, 0, 0, 0.35);
+  --note-title-focus: rgba(255, 255, 255, 0.5);
+  --note-content-focus: rgba(255, 255, 255, 0.35);
+  --note-delete: #333333;
+  --note-delete-hover: rgba(0, 0, 0, 0.08);
+  --swatch-border: rgba(0, 0, 0, 0.2);
+  --swatch-active: #333333;
+
   position: relative;
   border-radius: 4px 4px 6px 6px;
   padding: 10px 12px 8px;
-  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--note-shadow);
   transition: transform 0.15s ease;
+  color: var(--note-text);
+}
+
+.note.note-on-dark {
+  --note-text: #ececec;
+  --note-shadow: 0 3px 8px rgba(0, 0, 0, 0.5);
+  --note-shadow-focus: 0 4px 12px rgba(0, 0, 0, 0.65);
+  --note-fold: rgba(255, 255, 255, 0.1);
+  --note-handle: rgba(255, 255, 255, 0.45);
+  --note-date: rgba(255, 255, 255, 0.45);
+  --note-placeholder: rgba(255, 255, 255, 0.35);
+  --note-title-focus: rgba(255, 255, 255, 0.12);
+  --note-content-focus: rgba(255, 255, 255, 0.08);
+  --note-delete: #d6d6d6;
+  --note-delete-hover: rgba(255, 255, 255, 0.12);
+  --swatch-border: rgba(255, 255, 255, 0.28);
+  --swatch-active: #ffffff;
 }
 
 .note:focus-within {
   transform: none !important;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.22);
+  box-shadow: var(--note-shadow-focus);
 }
 
 .note::after {
@@ -86,7 +212,7 @@ body {
   height: 0;
   border-style: solid;
   border-width: 0 16px 16px 0;
-  border-color: transparent rgba(0, 0, 0, 0.12) transparent transparent;
+  border-color: transparent var(--note-fold) transparent transparent;
 }
 
 .note-header {
@@ -101,7 +227,7 @@ body {
   cursor: grab;
   font-size: 14px;
   line-height: 1;
-  color: rgba(0, 0, 0, 0.4);
+  color: var(--note-handle);
   user-select: none;
   padding: 2px 2px;
 }
@@ -118,6 +244,7 @@ body {
   flex: 1 1 auto;
   border: none;
   background: transparent;
+  color: inherit;
   font-weight: 700;
   font-size: 14px;
   padding: 2px 4px;
@@ -126,8 +253,12 @@ body {
 
 .note-title:focus {
   outline: none;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--note-title-focus);
   border-radius: 4px;
+}
+
+.note-title::placeholder {
+  color: var(--note-placeholder);
 }
 
 .note-delete {
@@ -136,7 +267,7 @@ body {
   background: transparent;
   cursor: pointer;
   font-size: 13px;
-  color: #555;
+  color: var(--note-delete);
   opacity: 0.55;
   padding: 2px 6px;
   border-radius: 4px;
@@ -144,53 +275,163 @@ body {
 
 .note-delete:hover {
   opacity: 1;
-  background: rgba(0, 0, 0, 0.08);
+  background: var(--note-delete-hover);
 }
 
+/* textarea가 아니라 contenteditable이라, 줄바꿈과 연속 공백을 pre-wrap으로
+   직접 지켜 줘야 한다. 패널을 아주 좁혀도 가로 스크롤이 생기지 않도록
+   긴 단어는 아무 데서나 끊는다. */
 .note-content {
-  width: 100%;
+  position: relative;
   min-height: 70px;
-  resize: vertical;
-  border: none;
-  background: transparent;
+  color: inherit;
   font-family: inherit;
   font-size: 13px;
   line-height: 1.5;
   padding: 4px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border-radius: 4px;
 }
 
 .note-content:focus {
   outline: none;
-  background: rgba(255, 255, 255, 0.35);
-  border-radius: 4px;
+  background: var(--note-content-focus);
 }
 
+/* placeholder 속성이 없는 대신 비었을 때만 안내문을 겹쳐 그린다. 흐름에서
+   빼 두지 않으면 빈 줄을 하나 더 밀어내 높이가 들쭉날쭉해진다. */
+.note-content.is-blank::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  color: var(--note-placeholder);
+  pointer-events: none;
+}
+
+.note-content b {
+  font-weight: 700;
+}
+
+/* 색 스와치가 줄을 넘길 수 있어야 패널을 좁혔을 때 날짜와 겹치지 않는다.
+   이 두 줄이 사이드패널의 최소 너비를 결정하던 부분이다. */
 .note-footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 8px;
   margin-top: 6px;
 }
 
 .color-swatches {
   display: flex;
+  flex-wrap: wrap;
   gap: 5px;
+  min-width: 0;
 }
 
 .swatch {
+  flex: 0 0 auto;
   width: 15px;
   height: 15px;
   border-radius: 50%;
-  border: 1px solid rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--swatch-border);
   cursor: pointer;
   padding: 0;
 }
 
 .swatch.active {
-  border: 2px solid #333;
+  border: 2px solid var(--swatch-active);
+}
+
+.swatch:focus-visible,
+.swatch-custom:has(.swatch-input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* 직접 고르기 칸. 기본색을 쓰는 동안에는 무지개로 "여기서 아무 색이나"를
+   알리고, 직접 고른 색이 쓰이면 JS가 그 색으로 덮어써서 선택 상태가 된다. */
+.swatch-custom {
+  position: relative;
+  display: inline-block;
+  background: conic-gradient(
+    #f87171,
+    #fbbf24,
+    #4ade80,
+    #38bdf8,
+    #a78bfa,
+    #f87171
+  );
+}
+
+.swatch-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  border: none;
+  padding: 0;
+  cursor: pointer;
 }
 
 .note-date {
+  flex: 0 0 auto;
+  margin-left: auto;
   font-size: 10px;
-  color: rgba(0, 0, 0, 0.45);
+  color: var(--note-date);
+}
+
+/* 사이드패널을 최대한 좁혀 놓고도 쓸 수 있게, 이 아래로는 가로 여백과
+   글자 크기를 줄인다. 위의 flex-wrap과 합쳐 대략 180px까지 내려간다. */
+@media (max-width: 260px) {
+  .app-header {
+    padding: 10px 8px;
+    gap: 6px;
+  }
+
+  .app-header h1 {
+    font-size: 14px;
+  }
+
+  .notes-list {
+    padding: 8px;
+    gap: 12px;
+  }
+
+  .empty-state {
+    padding: 0 10px;
+  }
+
+  .note {
+    padding: 8px 8px 6px;
+  }
+
+  .note-header {
+    gap: 3px;
+  }
+
+  .note-handle {
+    padding: 2px 0;
+  }
+
+  .note-title {
+    padding: 2px;
+  }
+
+  .note-delete {
+    padding: 2px 3px;
+  }
+
+  .color-swatches {
+    gap: 4px;
+  }
+
+  .swatch {
+    width: 13px;
+    height: 13px;
+  }
 }
