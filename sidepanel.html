@@ -7,7 +7,23 @@
 </head>
 <body>
   <header class="app-header">
-    <h1>📝 적자생존!</h1>
+    <!-- 타이틀 자리의 오늘의 사자성어. 글자와 뜻은 idioms.js에서 골라 JS가 채운다.
+         말풍선을 h1 밖에 두는 이유: h1은 말줄임 때문에 overflow가 막혀 있어
+         안에 두면 말풍선이 잘린다. -->
+    <div class="brand">
+      <h1>
+        <span aria-hidden="true">📝</span>
+        <span class="idiom-label">사자성어</span>
+        <a id="idiom" class="idiom" href="https://hanja.dict.naver.com/#/main"
+           target="_blank" rel="noopener" aria-describedby="idiom-tip">適者生存</a>
+      </h1>
+      <div id="idiom-tip" class="idiom-tip" role="tooltip">
+        <span class="idiom-tip-title">오늘의 사자성어</span>
+        <strong id="idiom-reading" class="idiom-reading">적자생존</strong>
+        <span id="idiom-meaning" class="idiom-meaning">환경에 가장 잘 적응하는 것만이 살아남음</span>
+        <span class="idiom-hint">클릭하면 네이버 한자사전에서 보기</span>
+      </div>
+    </div>
     <div class="header-actions">
       <button id="theme-btn" class="btn btn-icon btn-quiet" type="button" aria-label="테마 변경"></button>
       <button id="add-note-btn" class="btn btn-icon btn-primary" type="button"
@@ -46,6 +62,7 @@
     </section>
   </template>
 
+  <script src="idioms.js"></script>
   <script src="sidepanel.js"></script>
 </body>
 </html>

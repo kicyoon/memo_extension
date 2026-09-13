@@ -879,6 +879,35 @@ listEl.addEventListener("drop", (e) => {
   e.preventDefault();
 });
 
+// 헤더 타이틀 자리의 오늘의 사자성어. 날짜로 고르므로 하루 동안은 패널을
+// 몇 번 열어도 같은 성어가 나온다. 날짜에 곱하는 7919는 목록 길이를 나누지
+// 않는 소수라, 날마다 목록을 건너뛰며 전체를 한 바퀴 돈 뒤에야 반복된다.
+const IDIOM_SEARCH_URL = "https://hanja.dict.naver.com/#/search?range=all&query=";
+const IDIOM_DAY_STEP = 7919;
+const idiomLink = document.getElementById("idiom");
+
+function todaysIdiom() {
+  const localNow = Date.now() - new Date().getTimezoneOffset() * 60000;
+  const day = Math.floor(localNow / 86400000);
+  return IDIOMS[(day * IDIOM_DAY_STEP) % IDIOMS.length];
+}
+
+function showTodaysIdiom() {
+  const idiom = todaysIdiom();
+  idiomLink.textContent = idiom.hanja;
+  idiomLink.href = IDIOM_SEARCH_URL + encodeURIComponent(idiom.hanja);
+  document.getElementById("idiom-reading").textContent = idiom.hangul;
+  document.getElementById("idiom-meaning").textContent = idiom.meaning;
+}
+
+// 사이드패널 안에서 링크를 따라가지 않고 브라우저 탭으로 연다.
+// tabs.create는 url만 넘길 때 별도 권한이 필요 없다.
+idiomLink.addEventListener("click", (e) => {
+  e.preventDefault();
+  chrome.tabs.create({ url: idiomLink.href });
+});
+
+showTodaysIdiom();
 addBtn.addEventListener("click", addNote);
 themeBtn.addEventListener("click", cycleTheme);
 
