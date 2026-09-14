@@ -25,6 +25,25 @@
       </div>
     </div>
     <div class="header-actions">
+      <div class="format-menu">
+        <button id="format-btn" class="btn btn-icon btn-quiet" type="button"
+                aria-haspopup="true" aria-expanded="false" aria-label="글씨체 설정"
+                title="글씨체 설정">
+          <span class="format-icon" aria-hidden="true">가</span>
+        </button>
+        <div id="format-popover" class="format-popover" hidden>
+          <div class="format-row" role="group" aria-label="글씨 스타일">
+            <button type="button" class="format-toggle" data-cmd="bold"
+                    title="굵게 (Ctrl+B)" aria-label="굵게" aria-pressed="false"><b>B</b></button>
+            <button type="button" class="format-toggle" data-cmd="italic"
+                    title="기울임 (Ctrl+I)" aria-label="기울임" aria-pressed="false"><i>I</i></button>
+            <button type="button" class="format-toggle" data-cmd="underline"
+                    title="밑줄 (Ctrl+U)" aria-label="밑줄" aria-pressed="false"><u>U</u></button>
+          </div>
+          <div class="format-colors" role="group" aria-label="글자 색"></div>
+          <p class="format-hint">메모 내용을 선택하면 적용됩니다.</p>
+        </div>
+      </div>
       <button id="theme-btn" class="btn btn-icon btn-quiet" type="button" aria-label="테마 변경"></button>
       <button id="add-note-btn" class="btn btn-icon btn-primary" type="button"
               title="새 메모 추가" aria-label="새 메모 추가">

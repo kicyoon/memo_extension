@@ -20,6 +20,14 @@ const DARK_COLORS = {
   "#E1BEE7": "#4A2F52", // 보라
 };
 
+// 글자색 팝오버의 기본 팔레트. 배경색(COLORS)과 달리 잉크로 쓸 색이라
+// 채도를 낮추지 않고 그대로 쓴다.
+const TEXT_COLORS = ["#E03131", "#E8590C", "#2F9E44", "#1971C2", "#9C36B5", "#343A40"];
+
+// Ctrl(맥은 ⌘) + 이 키로 선택 글자에 서식을 건다. e.code(물리 키 위치)를
+// 기준으로 삼아야 한글 입력 상태에서도 같은 키가 같은 서식으로 이어진다.
+const FORMAT_SHORTCUTS = { KeyB: "bold", KeyI: "italic", KeyU: "underline" };
+
 const STORAGE_KEY = "notes";
 const THEME_KEY = "theme";
 
@@ -68,6 +76,11 @@ const darkMedia = window.matchMedia("(prefers-color-scheme: dark)");
 let notes = [];
 let themeSetting = "system";
 const saveTimers = new Map();
+
+// 각 메모의 contentArea(DOM)에서 그 메모의 bindEditableField().commit을
+// 곧장 찾기 위한 표. 글씨체 팝오버는 어떤 메모를 편집 중이었는지 모르는
+// 채로 시작하므로, 이 표가 없으면 서식을 건 뒤 저장할 방법이 없다.
+const contentFieldByArea = new WeakMap();
 
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -181,6 +194,8 @@ function isDarkColor(hex) {
  * ------------------------------------------------------------------ */
 
 const BOLD_TAGS = new Set(["B", "STRONG"]);
+const ITALIC_TAGS = new Set(["I", "EM"]);
+const UNDERLINE_TAGS = new Set(["U"]);
 const BLOCK_TAGS = new Set([
   "DIV",
   "P",
@@ -204,6 +219,35 @@ function isBoldElement(el) {
   return parseInt(weight, 10) >= 600;
 }
 
+function isItalicElement(el) {
+  if (ITALIC_TAGS.has(el.tagName)) return true;
+  const style = el.style && el.style.fontStyle;
+  return style === "italic" || style === "oblique";
+}
+
+function isUnderlineElement(el) {
+  if (UNDERLINE_TAGS.has(el.tagName)) return true;
+  const style = el.style && (el.style.textDecorationLine || el.style.textDecoration);
+  return !!style && style.includes("underline");
+}
+
+// execCommand("foreColor")는 <font color>를 만들고, 바깥에서 붙여넣은
+// HTML은 style.color를 쓸 수 있다. 브라우저가 style.color를 항상
+// "rgb(r, g, b)"로 정규화해 돌려주므로, 우리 모델(헥스)에 맞게 바꿔 준다.
+function elementColor(el) {
+  if (el.tagName === "FONT" && el.hasAttribute("color")) {
+    return normalizeHex(el.getAttribute("color"));
+  }
+  const style = el.style && el.style.color;
+  if (!style) return null;
+  const m = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(style);
+  if (m) {
+    const hex = "#" + [m[1], m[2], m[3]].map((v) => Number(v).toString(16).padStart(2, "0")).join("");
+    return normalizeHex(hex);
+  }
+  return normalizeHex(style);
+}
+
 // 블록 끝의 <br>은 빈 줄을 지탱하려고 브라우저가 넣어 둔 것이라 줄로 세지 않는다.
 function isTrailingNode(siblings, index) {
   for (let i = index + 1; i < siblings.length; i++) {
@@ -218,6 +262,11 @@ function htmlToLines(root) {
   const lines = [];
   let run = [];
   let boldDepth = 0;
+  let italicDepth = 0;
+  let underlineDepth = 0;
+  // 굵게/기울임/밑줄과 달리 색은 단순 on/off가 아니라 값이라 depth 대신
+  // 스택을 쓴다. 지금 유효한 색은 항상 스택 맨 위(가장 안쪽 <font>) 값이다.
+  const colorStack = [];
   // "지금 줄이 시작되긴 했다"는 표시. 글자가 하나도 없는 마지막 빈 줄을
   // 살리는 데 쓴다 — filler <br>만 있는 줄은 run이 비어 있어서, 이 표시가
   // 없으면 마지막에 통째로 버려진다.
@@ -232,9 +281,21 @@ function htmlToLines(root) {
   const pushText = (text) => {
     if (!text) return;
     const bold = boldDepth > 0;
+    const italic = italicDepth > 0;
+    const underline = underlineDepth > 0;
+    const color = colorStack.length ? colorStack[colorStack.length - 1] : null;
     const last = run[run.length - 1];
-    if (last && last.bold === bold) last.text += text;
-    else run.push({ text, bold });
+    if (
+      last &&
+      last.bold === bold &&
+      last.italic === italic &&
+      last.underline === underline &&
+      last.color === color
+    ) {
+      last.text += text;
+    } else {
+      run.push({ text, bold, italic, underline, color });
+    }
     lineOpen = true;
   };
 
@@ -261,9 +322,18 @@ function htmlToLines(root) {
       if (isBlock && run.length) endLine();
 
       const bold = isBoldElement(child);
+      const italic = isItalicElement(child);
+      const underline = isUnderlineElement(child);
+      const color = elementColor(child);
       if (bold) boldDepth++;
+      if (italic) italicDepth++;
+      if (underline) underlineDepth++;
+      if (color) colorStack.push(color);
       walk(child);
       if (bold) boldDepth--;
+      if (italic) italicDepth--;
+      if (underline) underlineDepth--;
+      if (color) colorStack.pop();
 
       if (isBlock) endLine();
     });
@@ -282,16 +352,22 @@ function linesToText(lines) {
   return lines.map((runs) => runs.map((r) => r.text).join("")).join("\n");
 }
 
+// 서식은 색(font) > 굵게(b) > 기울임(i) > 밑줄(u) 순으로 감싼다. 중첩
+// 순서 자체는 렌더링에 영향이 없지만, 순서를 고정해야 직렬화 결과가
+// 항상 같은 모양으로 나온다.
+function runToHtml(r) {
+  let html = escapeHtml(r.text);
+  if (r.underline) html = `<u>${html}</u>`;
+  if (r.italic) html = `<i>${html}</i>`;
+  if (r.bold) html = `<b>${html}</b>`;
+  if (r.color) html = `<font color="${r.color}">${html}</font>`;
+  return html;
+}
+
 function linesToHtml(lines) {
   return lines
     .map((runs) => {
-      const inner = runs.length
-        ? runs
-            .map((r) =>
-              r.bold ? `<b>${escapeHtml(r.text)}</b>` : escapeHtml(r.text)
-            )
-            .join("")
-        : "<br>";
+      const inner = runs.length ? runs.map(runToHtml).join("") : "<br>";
       return `<div>${inner}</div>`;
     })
     .join("");
@@ -317,7 +393,11 @@ function plainToHtml(text) {
   return serializeLines(
     String(text)
       .split("\n")
-      .map((line) => (line ? [{ text: line, bold: false }] : []))
+      .map((line) =>
+        line
+          ? [{ text: line, bold: false, italic: false, underline: false, color: null }]
+          : []
+      )
   );
 }
 
@@ -695,17 +775,21 @@ function createNoteElement(note) {
   const contentField = bindEditableField(contentArea, note, "content", () =>
     refreshBlankState(contentArea)
   );
+  // 글씨체 팝오버가 이 메모의 commit을 찾을 수 있도록 등록해 둔다.
+  contentFieldByArea.set(contentArea, contentField);
 
-  // Ctrl+B(맥은 ⌘B)로 선택한 글자를 굵게. e.code를 함께 보는 이유는 한글
-  // 입력 상태에서 e.key가 자판 위치가 아니라 글자로 오는 경우가 있어서다.
+  // Ctrl+B/I/U(맥은 ⌘)로 선택한 글자에 굵게/기울임/밑줄을 건다. e.code(물리
+  // 키 위치)를 기준으로 삼는 이유는 한글 입력 상태에서 e.key가 자판 위치가
+  // 아니라 글자로 오는 경우가 있어서다.
   contentArea.addEventListener("keydown", (e) => {
     if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
-    if (e.code !== "KeyB" && e.key !== "b" && e.key !== "B") return;
+    const command = FORMAT_SHORTCUTS[e.code];
+    if (!command) return;
     e.preventDefault();
     // 조합 중에 서식을 건드리면 IME가 만들던 글자가 깨진다. 조합이 끝난
     // 뒤에 다시 누르게 두는 편이 안전하다.
     if (e.isComposing) return;
-    document.execCommand("bold");
+    document.execCommand(command);
     refreshBlankState(contentArea);
     contentField.commit();
   });
@@ -905,6 +989,179 @@ function showTodaysIdiom() {
 idiomLink.addEventListener("click", (e) => {
   e.preventDefault();
   chrome.tabs.create({ url: idiomLink.href });
+});
+
+/* ------------------------------------------------------------------ *
+ * 글씨체 설정 팝오버 (굵게 / 기울임 / 밑줄 / 글자색)
+ *
+ * 팝오버 버튼을 누르는 순간 포커스가 note-content 밖으로 나가면 브라우저
+ * 선택 영역이 사라져 서식을 적용할 대상을 잃는다. 그래서 팝오버 안의
+ * 버튼은 모두 mousedown에서 기본 동작(포커스 이동)을 막아, 클릭해도
+ * 어떤 메모를 편집 중이었는지 그대로 유지한다. 유일한 예외는 <input
+ * type="color">인데, 네이티브 색상 선택창을 열려면 실제로 포커스를
+ * 받아야 하므로 그 경우만 직접 선택 영역을 저장해 뒀다가 복원한다.
+ * ------------------------------------------------------------------ */
+const formatBtn = document.getElementById("format-btn");
+const formatPopover = document.getElementById("format-popover");
+const formatColorsEl = formatPopover.querySelector(".format-colors");
+
+let savedSelection = null; // { area, range } — 포커스가 note-content를 벗어나기 직전의 선택 영역
+
+function focusedContentArea() {
+  const el = document.activeElement;
+  return el && el.classList && el.classList.contains("note-content") ? el : null;
+}
+
+function openFormatPopover() {
+  formatPopover.hidden = false;
+  formatBtn.setAttribute("aria-expanded", "true");
+  refreshFormatState();
+}
+
+function closeFormatPopover() {
+  formatPopover.hidden = true;
+  formatBtn.setAttribute("aria-expanded", "false");
+}
+
+// 굵게/기울임/밑줄 버튼이 지금 선택 영역의 실제 상태를 보여 주고, 편집
+// 중인 메모가 없으면 버튼 대신 안내문을 보여 준다.
+function refreshFormatState() {
+  const area = focusedContentArea();
+  formatPopover.classList.toggle("is-disabled", !area);
+  formatPopover.querySelectorAll(".format-toggle").forEach((btn) => {
+    const on = !!area && document.queryCommandState(btn.dataset.cmd);
+    btn.setAttribute("aria-pressed", String(on));
+  });
+}
+
+// 서식을 적용한 뒤 공통으로 해야 할 뒷정리(빈 상태 갱신, 저장, 버튼 상태
+// 갱신)를 한데 모았다. area가 없으면 적용할 메모가 없다는 뜻이라 그냥
+// 무시한다.
+function applyFormat(area, run) {
+  if (!area) return;
+  run();
+  refreshBlankState(area);
+  const field = contentFieldByArea.get(area);
+  if (field) field.commit();
+  refreshFormatState();
+}
+
+// removeFormat은 글자색뿐 아니라 굵게/기울임/밑줄까지 전부 지워 버린다.
+// 그래서 지우기 전에 세 상태를 기억해 뒀다가 다시 걸어 준다.
+function removeSelectionColor() {
+  const wasBold = document.queryCommandState("bold");
+  const wasItalic = document.queryCommandState("italic");
+  const wasUnderline = document.queryCommandState("underline");
+  document.execCommand("removeFormat");
+  if (wasBold) document.execCommand("bold");
+  if (wasItalic) document.execCommand("italic");
+  if (wasUnderline) document.execCommand("underline");
+}
+
+// 네이티브 색상 선택창을 열기 직전, 포커스가 옮겨가기 전의 선택 영역을
+// 복원한다(포커스와 선택을 다시 note-content로 되돌린 뒤 그 영역을
+// 돌려준다). 저장된 영역이 이미 문서에서 사라졌다면(메모 삭제 등) 아무것도
+// 하지 않는다.
+function restoreSavedSelection() {
+  if (!savedSelection || !document.contains(savedSelection.area)) return null;
+  const { area, range } = savedSelection;
+  area.focus();
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  return area;
+}
+
+// 기본 6색 + 색 지우기 + 직접 고르기.
+function buildFormatColors(container) {
+  const noneBtn = document.createElement("button");
+  noneBtn.type = "button";
+  noneBtn.className = "format-color format-color-none";
+  noneBtn.dataset.color = "";
+  noneBtn.title = "글자색 지우기";
+  noneBtn.setAttribute("aria-label", "글자색 지우기");
+  container.appendChild(noneBtn);
+
+  TEXT_COLORS.forEach((color) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "format-color";
+    btn.dataset.color = color;
+    btn.style.background = color;
+    btn.title = "글자색";
+    btn.setAttribute("aria-label", `글자색 ${color}`);
+    container.appendChild(btn);
+  });
+
+  container.querySelectorAll(".format-color[data-color]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const color = btn.dataset.color;
+      applyFormat(focusedContentArea(), () => {
+        if (color) document.execCommand("foreColor", false, color);
+        else removeSelectionColor();
+      });
+    });
+  });
+
+  const customLabel = document.createElement("label");
+  customLabel.className = "format-color format-color-custom";
+  customLabel.title = "직접 색 고르기";
+  const customInput = document.createElement("input");
+  customInput.type = "color";
+  customInput.className = "format-color-input";
+  customInput.setAttribute("aria-label", "글자색 직접 고르기");
+  customLabel.appendChild(customInput);
+  container.appendChild(customLabel);
+
+  // input은 색을 고르는 동안 계속 온다(미리보기). 클릭하는 순간 포커스가
+  // 색상 선택창으로 넘어가 선택 영역이 사라지므로, selectionchange가
+  // 미리 저장해 둔 영역을 매번 복원한 뒤 적용한다.
+  customInput.addEventListener("input", () => {
+    const area = restoreSavedSelection();
+    if (!area) return;
+    applyFormat(area, () => document.execCommand("foreColor", false, customInput.value));
+  });
+}
+
+buildFormatColors(formatColorsEl);
+
+formatBtn.addEventListener("mousedown", (e) => e.preventDefault());
+formatBtn.addEventListener("click", () => {
+  if (formatPopover.hidden) openFormatPopover();
+  else closeFormatPopover();
+});
+
+formatPopover.addEventListener("mousedown", (e) => {
+  if (e.target.closest(".format-color-custom")) return; // 네이티브 색상 선택창은 포커스가 필요하다
+  e.preventDefault();
+});
+
+formatPopover.querySelectorAll(".format-toggle").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    applyFormat(focusedContentArea(), () => document.execCommand(btn.dataset.cmd));
+  });
+});
+
+// note-content 안에서 선택이 바뀔 때마다(포커스가 거기 있는 동안만) 최신
+// 선택 영역을 기억해 둔다. 색상 선택창처럼 포커스가 밖으로 나가야 하는
+// 조작 직전, 마지막으로 남은 유효한 선택을 여기서 가져와 되돌린다.
+document.addEventListener("selectionchange", () => {
+  const area = focusedContentArea();
+  const sel = window.getSelection();
+  if (area && sel && sel.rangeCount) {
+    savedSelection = { area, range: sel.getRangeAt(0).cloneRange() };
+  }
+  if (!formatPopover.hidden) refreshFormatState();
+});
+
+document.addEventListener("click", (e) => {
+  if (formatPopover.hidden) return;
+  if (formatBtn.contains(e.target) || formatPopover.contains(e.target)) return;
+  closeFormatPopover();
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !formatPopover.hidden) closeFormatPopover();
 });
 
 showTodaysIdiom();
