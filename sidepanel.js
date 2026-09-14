@@ -231,21 +231,26 @@ function isUnderlineElement(el) {
   return !!style && style.includes("underline");
 }
 
-// execCommand("foreColor")는 <font color>를 만들고, 바깥에서 붙여넣은
-// HTML은 style.color를 쓸 수 있다. 브라우저가 style.color를 항상
-// "rgb(r, g, b)"로 정규화해 돌려주므로, 우리 모델(헥스)에 맞게 바꿔 준다.
-function elementColor(el) {
-  if (el.tagName === "FONT" && el.hasAttribute("color")) {
-    return normalizeHex(el.getAttribute("color"));
-  }
-  const style = el.style && el.style.color;
-  if (!style) return null;
-  const m = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(style);
+// 브라우저가 돌려주는 "rgb(r, g, b)"/"rgba(r, g, b, a)" 형태를 우리 모델의
+// 헥스로 바꾼다. style.color, getComputedStyle().color, queryCommandValue
+// ("foreColor")가 전부 이 형태라 여러 곳에서 같이 쓴다.
+function cssColorToHex(css) {
+  if (!css) return null;
+  const m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(css);
   if (m) {
     const hex = "#" + [m[1], m[2], m[3]].map((v) => Number(v).toString(16).padStart(2, "0")).join("");
     return normalizeHex(hex);
   }
-  return normalizeHex(style);
+  return normalizeHex(css);
+}
+
+// execCommand("foreColor")는 <font color>를 만들고, 바깥에서 붙여넣은
+// HTML은 style.color를 쓸 수 있다.
+function elementColor(el) {
+  if (el.tagName === "FONT" && el.hasAttribute("color")) {
+    return normalizeHex(el.getAttribute("color"));
+  }
+  return el.style ? cssColorToHex(el.style.color) : null;
 }
 
 // 블록 끝의 <br>은 빈 줄을 지탱하려고 브라우저가 넣어 둔 것이라 줄로 세지 않는다.
@@ -1002,6 +1007,7 @@ idiomLink.addEventListener("click", (e) => {
  * 받아야 하므로 그 경우만 직접 선택 영역을 저장해 뒀다가 복원한다.
  * ------------------------------------------------------------------ */
 const formatBtn = document.getElementById("format-btn");
+const formatIcon = formatBtn.querySelector(".format-icon");
 const formatPopover = document.getElementById("format-popover");
 const formatColorsEl = formatPopover.querySelector(".format-colors");
 
@@ -1023,15 +1029,51 @@ function closeFormatPopover() {
   formatBtn.setAttribute("aria-expanded", "false");
 }
 
-// 굵게/기울임/밑줄 버튼이 지금 선택 영역의 실제 상태를 보여 주고, 편집
-// 중인 메모가 없으면 버튼 대신 안내문을 보여 준다.
+// 캐럿(또는 선택 시작점)을 감싼 <font color> 조상을 찾는다. queryCommandValue
+// ("foreColor")는 서식이 없어도 상속된 계산값(검정 등)을 그대로 돌려줘서
+// "색이 지정 안 됨"과 구분이 안 된다 — 우리 데이터 모델과 같은 기준(<font>
+// 조상의 유무)으로 판정해야 "색 지우기" 상태가 정확히 "색 없음"으로 보인다.
+function caretColor(area) {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return null;
+  let node = sel.getRangeAt(0).startContainer;
+  if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+  while (node && node !== area && area.contains(node)) {
+    const color = elementColor(node);
+    if (color) return color;
+    node = node.parentElement;
+  }
+  // 방금 막 색을 고른 직후의 빈 캐럿처럼 아직 <font> 조상이 안 생겼을 수
+  // 있다. 이 경우 브라우저가 들고 있는 "다음 입력에 쓰일 색"과 메모
+  // 기본 글자색을 비교해, 다르면 그 색이 곧 입력될 색이라고 본다.
+  const pending = cssColorToHex(document.queryCommandValue("foreColor"));
+  if (!pending) return null;
+  const baseline = cssColorToHex(getComputedStyle(area).color);
+  return pending !== baseline ? pending : null;
+}
+
+// 굵게/기울임/밑줄 버튼과 "가" 아이콘이 지금 캐럿의 실제 서식을 그대로
+// 보여 주게 한다. 팝오버를 닫아도 이 버튼 자체가 "지금 이 서식으로
+// 입력 중"이라는 표시로 남도록, 팝오버가 열려 있는지와 무관하게 매번
+// 갱신한다.
 function refreshFormatState() {
   const area = focusedContentArea();
+  const bold = !!area && document.queryCommandState("bold");
+  const italic = !!area && document.queryCommandState("italic");
+  const underline = !!area && document.queryCommandState("underline");
+  const color = area ? caretColor(area) : null;
+
   formatPopover.classList.toggle("is-disabled", !area);
   formatPopover.querySelectorAll(".format-toggle").forEach((btn) => {
-    const on = !!area && document.queryCommandState(btn.dataset.cmd);
+    const on = { bold, italic, underline }[btn.dataset.cmd];
     btn.setAttribute("aria-pressed", String(on));
   });
+
+  formatIcon.style.fontWeight = bold ? "800" : "";
+  formatIcon.style.fontStyle = italic ? "italic" : "";
+  formatIcon.style.textDecoration = underline ? "underline" : "";
+  formatIcon.style.color = color || "";
+  formatBtn.classList.toggle("is-active", bold || italic || underline || !!color);
 }
 
 // 서식을 적용한 뒤 공통으로 해야 할 뒷정리(빈 상태 갱신, 저장, 버튼 상태
@@ -1145,14 +1187,24 @@ formatPopover.querySelectorAll(".format-toggle").forEach((btn) => {
 // note-content 안에서 선택이 바뀔 때마다(포커스가 거기 있는 동안만) 최신
 // 선택 영역을 기억해 둔다. 색상 선택창처럼 포커스가 밖으로 나가야 하는
 // 조작 직전, 마지막으로 남은 유효한 선택을 여기서 가져와 되돌린다.
+//
+// refreshFormatState는 팝오버가 닫혀 있어도 부른다 — "가" 버튼 자체가
+// 지금 캐럿의 서식을 보여 주는 표시판이라, 타이핑하며 캐럿이 움직일
+// 때마다(선택이 바뀔 때마다) 계속 따라가야 한다.
 document.addEventListener("selectionchange", () => {
   const area = focusedContentArea();
   const sel = window.getSelection();
   if (area && sel && sel.rangeCount) {
     savedSelection = { area, range: sel.getRangeAt(0).cloneRange() };
   }
-  if (!formatPopover.hidden) refreshFormatState();
+  refreshFormatState();
 });
+
+// 클릭으로 메모를 옮겨 다니는 것처럼 캐럿 위치는 그대로인데 포커스만
+// 바뀌는 경우(예: 방금 만든 빈 메모에 자동 포커스)도 selectionchange가
+// 안 일어날 수 있어 focusin/focusout에서도 한 번 더 맞춰 준다.
+document.addEventListener("focusin", refreshFormatState);
+document.addEventListener("focusout", refreshFormatState);
 
 document.addEventListener("click", (e) => {
   if (formatPopover.hidden) return;

@@ -206,15 +206,20 @@ body {
   position: relative;
 }
 
-/* "가"에 굵게+기울임+밑줄을 한꺼번에 걸어, 별도 아이콘 없이 이 버튼이
-   글씨체 설정이라는 걸 그대로 보여 준다. */
+/* 지금 캐럿(또는 앞으로 입력될 글자)에 걸린 서식을 그대로 "가"에 입혀
+   보여 준다. JS(refreshFormatState)가 굵게/기울임/밑줄/색을 매번 갱신해
+   칠하므로, 여기서는 크기만 고정해 둔다. */
 .format-icon {
   font-size: 13px;
-  font-weight: 800;
-  font-style: italic;
-  text-decoration: underline;
-  text-underline-offset: 2px;
   line-height: 1;
+  text-underline-offset: 2px;
+}
+
+/* 서식이 하나라도 걸려 있으면 버튼 테두리를 강조색으로 띄워, 팝오버를
+   닫아도 "지금 이 서식으로 입력 중"이라는 게 한눈에 보이게 한다. */
+#format-btn.is-active {
+  background: var(--btn-quiet-hover);
+  border-color: var(--accent);
 }
 
 /* 호버로 여닫는 .idiom-tip과 달리 클릭으로 여닫으므로 hidden 속성만으로
