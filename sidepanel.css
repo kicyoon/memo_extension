@@ -670,11 +670,161 @@ body {
   cursor: pointer;
 }
 
+.note-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
 .note-date {
   flex: 0 0 auto;
-  margin-left: auto;
   font-size: 10px;
   color: var(--note-date);
+}
+
+/* 알림 설정. 푸터에는 종과 정해 둔 시각만 보이고, 시각·소리·지우기는 종을
+   누르면 열리는 패널에서 다룬다. 패널은 메모 배경색과 무관하게 테마의
+   말풍선 색(--tip-*)을 써서 어떤 메모 위에서도 읽힌다. */
+.note-reminder {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.note-reminder-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: none;
+  background: transparent;
+  color: var(--note-date);
+  font: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  padding: 2px 3px;
+  border-radius: 4px;
+}
+
+.note-reminder-btn:hover {
+  background: var(--note-delete-hover);
+  color: var(--note-text);
+}
+
+.note-reminder-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.note-reminder.is-set .note-reminder-btn {
+  color: var(--note-text);
+  font-weight: 600;
+}
+
+.note-reminder-text:empty {
+  display: none;
+}
+
+.note-reminder-muted {
+  display: none;
+}
+
+.note-reminder.is-set.is-muted .note-reminder-muted {
+  display: block;
+}
+
+/* 위로 연다. 아래로 열면 맨 아래 메모에서 목록 끝에 잘린다. */
+.note-reminder-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: max-content;
+  max-width: min(230px, calc(100vw - 48px));
+  padding: 10px 11px;
+  background: var(--tip-bg);
+  color: var(--tip-fg);
+  border: 1px solid var(--tip-border);
+  border-radius: 8px;
+  box-shadow: var(--tip-shadow);
+  font-size: 12px;
+  font-weight: 400;
+  text-align: left;
+}
+
+/* display:flex가 hidden 속성을 이기지 않도록 못박는다(.format-popover와 같은 이유). */
+.note-reminder-popover[hidden] {
+  display: none;
+}
+
+.reminder-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.reminder-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.note-reminder-input {
+  font: inherit;
+  font-size: 12px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--tip-border);
+  border-radius: 6px;
+  padding: 4px 6px;
+}
+
+.note-reminder-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.reminder-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+}
+
+.reminder-row input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.note-reminder-clear {
+  align-self: flex-start;
+  border: 1px solid var(--btn-quiet-border);
+  border-radius: 6px;
+  background: var(--btn-quiet-bg);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+
+.note-reminder-clear:hover:not(:disabled) {
+  background: var(--btn-quiet-hover);
+  border-color: var(--btn-quiet-hover-border);
+}
+
+.note-reminder-clear:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.note-reminder-clear:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /* Chrome 사이드패널은 자체 하한(약 320px) 아래로 내려가지 않는다. 확장이

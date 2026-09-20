@@ -621,11 +621,133 @@ chrome.storage.onChanged.addListener((changes, area) => {
   const incoming = changes[STORAGE_KEY].newValue || [];
   if (isEditingAnyNote()) {
     notes = incoming;
+    // 편집 중에는 통째로 다시 그리지 않는다. 알림이 울려서 지워진 경우처럼
+    // 바깥에서 바뀐 알림 시각만 화면에 맞춰 준다.
+    syncReminderButtons();
     return;
   }
   notes = incoming;
   render();
 });
+
+/* ------------------------------------------------------------------ *
+ * 메모별 알림 시각
+ *
+ * note.remindAt(밀리초 타임스탬프)만 저장한다. 실제로 알림을 울리는 건
+ * background.js가 storage 변경을 보고 chrome.alarms를 걸어서 한다.
+ * ------------------------------------------------------------------ */
+
+// <input type="datetime-local">은 "YYYY-MM-DDTHH:mm"(지역 시각)을 주고받는다.
+function toLocalInput(ts) {
+  const d = new Date(ts);
+  const pad = (n) => String(n).padStart(2, "0");
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    `T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  );
+}
+
+function formatReminder(ts) {
+  const d = new Date(ts);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// 종 버튼의 시각·소리 표시, 그리고 패널 안의 입력값을 저장된 알림 설정에
+// 맞춘다. note는 지워진 경우 undefined일 수 있다.
+function paintReminder(noteEl, note) {
+  const remindAt = note && note.remindAt;
+  const isSet = Number.isFinite(remindAt);
+  // 소리는 켜짐이 기본이라, 값이 없는 메모도 켜진 것으로 본다.
+  const muted = !!note && note.remindSound === false;
+  const box = noteEl.querySelector(".note-reminder");
+  const btn = box.querySelector(".note-reminder-btn");
+  box.classList.toggle("is-set", isSet);
+  box.classList.toggle("is-muted", muted);
+  box.querySelector(".note-reminder-text").textContent = isSet
+    ? formatReminder(remindAt)
+    : "";
+  box.querySelector(".note-reminder-input").value = isSet ? toLocalInput(remindAt) : "";
+  box.querySelector(".note-reminder-sound").checked = !muted;
+  box.querySelector(".note-reminder-clear").disabled = !isSet;
+
+  const label = isSet
+    ? `알림 ${formatReminder(remindAt)}${muted ? ", 소리 꺼짐" : ""} (눌러서 설정)`
+    : "알림 설정";
+  btn.title = label;
+  btn.setAttribute("aria-label", label);
+}
+
+// 편집 중이라 render()를 건너뛴 사이 바깥(백그라운드)에서 알림이 소진되는
+// 경우 등을 화면에 반영한다.
+function syncReminderButtons() {
+  listEl.querySelectorAll(".note").forEach((noteEl) => {
+    const note = notes.find((n) => n.id === noteEl.dataset.id);
+    if (note) paintReminder(noteEl, note);
+  });
+}
+
+function setReminderPopoverOpen(box, open) {
+  box.querySelector(".note-reminder-popover").hidden = !open;
+  box.querySelector(".note-reminder-btn").setAttribute("aria-expanded", String(open));
+}
+
+function closeReminderPopovers(except) {
+  listEl.querySelectorAll(".note-reminder").forEach((box) => {
+    if (box !== except) setReminderPopoverOpen(box, false);
+  });
+}
+
+function bindReminder(noteEl, note) {
+  const box = noteEl.querySelector(".note-reminder");
+  const btn = box.querySelector(".note-reminder-btn");
+  const popover = box.querySelector(".note-reminder-popover");
+  const input = box.querySelector(".note-reminder-input");
+  const soundBox = box.querySelector(".note-reminder-sound");
+  const clearBtn = box.querySelector(".note-reminder-clear");
+
+  // 이 클로저의 note는 storage.onChanged가 notes를 갈아치우면 낡은 객체가
+  // 되므로, 화면을 다시 칠할 때는 항상 id로 최신 값을 찾아 쓴다.
+  const repaint = () => paintReminder(noteEl, notes.find((n) => n.id === note.id));
+
+  repaint();
+
+  btn.addEventListener("click", () => {
+    const open = popover.hidden;
+    closeReminderPopovers(open ? box : null);
+    setReminderPopoverOpen(box, open);
+    if (open) {
+      // 지난 시각은 고를 수 없게 하한을 지금으로 둔다. 포커스를 패널 안으로
+      // 옮겨 두면 바깥에서 저장이 바뀌어도 패널이 다시 그려져 닫히지 않는다
+      // (isEditingAnyNote가 이 메모를 편집 중으로 본다).
+      input.min = toLocalInput(Date.now());
+      input.focus();
+    }
+  });
+
+  input.addEventListener("change", () => {
+    const ts = input.value ? new Date(input.value).getTime() : NaN;
+    if (!Number.isFinite(ts)) {
+      updateNote(note.id, { remindAt: null });
+    } else if (ts <= Date.now()) {
+      // 같은 날 이미 지난 시각은 min으로 다 걸러지지 않는다.
+      alert("지난 시각에는 알림을 걸 수 없어요.");
+    } else {
+      updateNote(note.id, { remindAt: ts });
+    }
+    repaint();
+  });
+
+  soundBox.addEventListener("change", () => {
+    updateNote(note.id, { remindSound: soundBox.checked });
+    repaint();
+  });
+
+  clearBtn.addEventListener("click", () => {
+    updateNote(note.id, { remindAt: null });
+    repaint();
+  });
+}
 
 function addNote() {
   const note = {
@@ -826,6 +948,7 @@ function createNoteElement(note) {
   });
 
   buildSwatches(swatchesEl, noteEl, note);
+  bindReminder(noteEl, note);
 
   return fragment;
 }
@@ -1207,14 +1330,20 @@ document.addEventListener("focusin", refreshFormatState);
 document.addEventListener("focusout", refreshFormatState);
 
 document.addEventListener("click", (e) => {
+  // 알림 설정 패널은 자기 종/패널 밖을 누르면 닫힌다.
+  closeReminderPopovers(e.target.closest ? e.target.closest(".note-reminder") : null);
+
   if (formatPopover.hidden) return;
   if (formatBtn.contains(e.target) || formatPopover.contains(e.target)) return;
   closeFormatPopover();
 });
 
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !formatPopover.hidden) closeFormatPopover();
+  if (e.key !== "Escape") return;
+  if (!formatPopover.hidden) closeFormatPopover();
+  closeReminderPopovers(null);
 });
+
 
 showTodaysIdiom();
 addBtn.addEventListener("click", addNote);
