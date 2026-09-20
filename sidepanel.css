@@ -567,7 +567,8 @@ body {
    긴 단어는 아무 데서나 끊는다. */
 .note-content {
   position: relative;
-  min-height: 70px;
+  /* 최소 2줄: 줄 높이 19.5px(13px × 1.5) × 2 + 위아래 padding 8px. */
+  min-height: 47px;
   color: inherit;
   font-family: inherit;
   font-size: 13px;
