@@ -105,7 +105,7 @@ body {
 /* 좌우 padding을 준 만큼 margin으로 되돌려 자리는 그대로 두고, 링크의
    포커스 테두리가 overflow에 잘리지 않을 여유만 만든다. */
 .app-header h1 {
-  font-size: 16px;
+  font-size: 14px;
   margin: -3px -4px;
   padding: 3px 4px;
   min-width: 0;
@@ -114,24 +114,37 @@ body {
   white-space: nowrap;
 }
 
-/* 성어가 주인공이므로 안내는 작은 배지 하나로 줄인다. 전체 문구
-   "오늘의 사자성어"는 말풍선의 .idiom-tip-title에서 보여 준다. */
-.idiom-label {
+/* 표시 종류는 작은 선택 메뉴로 두고, 실제 내용은 옆에 넓게 보여 준다. */
+.daily-type {
   margin-right: 3px;
-  padding: 1px 5px;
+  padding: 1px 3px;
   border-radius: 999px;
+  border: 0;
   background: var(--btn-quiet-bg);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
   color: var(--muted);
   vertical-align: 1px;
+  cursor: pointer;
+}
+
+.daily-type:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .idiom {
   color: inherit;
   text-decoration: none;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   border-radius: 4px;
+}
+
+.idiom.is-date,
+.idiom.is-date:hover {
+  cursor: default;
+  letter-spacing: 0;
+  text-decoration: none;
 }
 
 .idiom:hover {
@@ -865,7 +878,7 @@ body {
   }
 
   .app-header h1 {
-    font-size: 14px;
+    font-size: 13px;
   }
 
   .notes-list {

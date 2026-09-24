@@ -30,6 +30,7 @@ const FORMAT_SHORTCUTS = { KeyB: "bold", KeyI: "italic", KeyU: "underline" };
 
 const STORAGE_KEY = "notes";
 const THEME_KEY = "theme";
+const DAILY_TYPE_KEY = "dailyType";
 
 // 순환 순서 겸 유효값 목록.
 const THEMES = ["system", "light", "dark"];
@@ -75,6 +76,7 @@ const darkMedia = window.matchMedia("(prefers-color-scheme: dark)");
 
 let notes = [];
 let themeSetting = "system";
+let dailyType = "idiom";
 const saveTimers = new Map();
 
 // 각 메모의 contentArea(DOM)에서 그 메모의 bindEditableField().commit을
@@ -509,12 +511,17 @@ function setCaretOffset(el, offset) {
  * ------------------------------------------------------------------ */
 
 function loadNotes() {
-  chrome.storage.local.get([STORAGE_KEY, THEME_KEY], (result) => {
+  chrome.storage.local.get([STORAGE_KEY, THEME_KEY, DAILY_TYPE_KEY], (result) => {
     // 흰 화면이 번쩍이지 않도록 메모를 그리기 전에 테마부터 확정한다.
     themeSetting = THEMES.includes(result[THEME_KEY])
       ? result[THEME_KEY]
       : "system";
     applyTheme();
+    dailyType = ["idiom", "quote", "date"].includes(result[DAILY_TYPE_KEY])
+      ? result[DAILY_TYPE_KEY]
+      : "idiom";
+    dailyTypeSelect.value = dailyType;
+    showDailyInfo();
     notes = Array.isArray(result[STORAGE_KEY]) ? result[STORAGE_KEY] : [];
     render();
   });
@@ -614,6 +621,15 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (THEMES.includes(incomingTheme) && incomingTheme !== themeSetting) {
       themeSetting = incomingTheme;
       applyTheme();
+    }
+  }
+
+  if (changes[DAILY_TYPE_KEY]) {
+    const incomingType = changes[DAILY_TYPE_KEY].newValue;
+    if (["idiom", "quote", "date"].includes(incomingType) && incomingType !== dailyType) {
+      dailyType = incomingType;
+      dailyTypeSelect.value = dailyType;
+      showDailyInfo();
     }
   }
 
@@ -1095,27 +1111,90 @@ listEl.addEventListener("drop", (e) => {
 // 몇 번 열어도 같은 성어가 나온다. 날짜에 곱하는 7919는 목록 길이를 나누지
 // 않는 소수라, 날마다 목록을 건너뛰며 전체를 한 바퀴 돈 뒤에야 반복된다.
 const IDIOM_SEARCH_URL = "https://hanja.dict.naver.com/#/search?range=all&query=";
+const NAVER_SEARCH_URL =
+  "https://search.naver.com/search.naver?sm=tab_hty.top&where=nexearch&ssc=tab.nx.all&query=";
 const IDIOM_DAY_STEP = 7919;
 const idiomLink = document.getElementById("idiom");
+const dailyTypeSelect = document.getElementById("daily-type");
+let idiomRefreshTimer;
 
-function todaysIdiom() {
-  const localNow = Date.now() - new Date().getTimezoneOffset() * 60000;
-  const day = Math.floor(localNow / 86400000);
-  return IDIOMS[(day * IDIOM_DAY_STEP) % IDIOMS.length];
+function localDayNumber(now) {
+  const localNow = now.getTime() - now.getTimezoneOffset() * 60000;
+  return Math.floor(localNow / 86400000);
 }
 
-function showTodaysIdiom() {
-  const idiom = todaysIdiom();
-  idiomLink.textContent = idiom.hanja;
-  idiomLink.href = IDIOM_SEARCH_URL + encodeURIComponent(idiom.hanja);
-  document.getElementById("idiom-reading").textContent = idiom.hangul;
-  document.getElementById("idiom-meaning").textContent = idiom.meaning;
+function todaysIdiom(now = new Date()) {
+  return IDIOMS[(localDayNumber(now) * IDIOM_DAY_STEP) % IDIOMS.length];
 }
+
+function todaysQuote(now = new Date()) {
+  return QUOTES[(localDayNumber(now) * IDIOM_DAY_STEP) % QUOTES.length];
+}
+
+function showDailyInfo() {
+  const now = new Date();
+  const tipTitle = document.querySelector(".idiom-tip-title");
+  const reading = document.getElementById("idiom-reading");
+  const meaning = document.getElementById("idiom-meaning");
+  const hint = document.querySelector(".idiom-hint");
+  idiomLink.classList.toggle("is-date", dailyType === "date");
+  idiomLink.setAttribute("aria-disabled", dailyType === "date" ? "true" : "false");
+
+  if (dailyType === "quote") {
+    const quote = todaysQuote(now);
+    idiomLink.textContent = quote.text;
+    idiomLink.href =
+      NAVER_SEARCH_URL + encodeURIComponent(`${quote.text} ${quote.author} 명언`);
+    tipTitle.textContent = "오늘의 명언";
+    reading.textContent = quote.text;
+    meaning.textContent = `— ${quote.author}`;
+    hint.textContent = "클릭하면 네이버 명언정보에서 보기";
+  } else if (dailyType === "date") {
+    const fullDate = new Intl.DateTimeFormat("ko-KR", {
+      year: "numeric", month: "long", day: "numeric", weekday: "long",
+    }).format(now);
+    idiomLink.textContent = new Intl.DateTimeFormat("ko-KR", {
+      month: "long", day: "numeric", weekday: "short",
+    }).format(now);
+    idiomLink.removeAttribute("href");
+    tipTitle.textContent = "오늘 날짜";
+    reading.textContent = fullDate;
+    meaning.textContent = "";
+    hint.textContent = "날짜는 자정에 자동으로 바뀝니다";
+  } else {
+    const idiom = todaysIdiom(now);
+    idiomLink.textContent = idiom.hanja;
+    idiomLink.href = IDIOM_SEARCH_URL + encodeURIComponent(idiom.hanja);
+    tipTitle.textContent = "오늘의 사자성어";
+    reading.textContent = idiom.hangul;
+    meaning.textContent = idiom.meaning;
+    hint.textContent = "클릭하면 네이버 한자사전에서 보기";
+  }
+
+  // 현지 시각의 다음 자정에 갱신한다. 매번 다시 계산해 날짜별 시간 차이도 반영한다.
+  clearTimeout(idiomRefreshTimer);
+  const nextMidnight = new Date(now);
+  nextMidnight.setHours(24, 0, 0, 0);
+  idiomRefreshTimer = setTimeout(showDailyInfo, nextMidnight - now);
+}
+
+// 절전이나 백그라운드 상태에서 타이머가 늦어졌다면 패널로 돌아올 때 갱신한다.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") showDailyInfo();
+});
+window.addEventListener("focus", showDailyInfo);
+
+dailyTypeSelect.addEventListener("change", () => {
+  dailyType = dailyTypeSelect.value;
+  chrome.storage.local.set({ [DAILY_TYPE_KEY]: dailyType });
+  showDailyInfo();
+});
 
 // 사이드패널 안에서 링크를 따라가지 않고 브라우저 탭으로 연다.
 // tabs.create는 url만 넘길 때 별도 권한이 필요 없다.
 idiomLink.addEventListener("click", (e) => {
   e.preventDefault();
+  if (dailyType === "date") return;
   chrome.tabs.create({ url: idiomLink.href });
 });
 
@@ -1345,7 +1424,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 
-showTodaysIdiom();
+showDailyInfo();
 addBtn.addEventListener("click", addNote);
 themeBtn.addEventListener("click", cycleTheme);
 

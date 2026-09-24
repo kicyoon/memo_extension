@@ -7,13 +7,17 @@
 </head>
 <body>
   <header class="app-header">
-    <!-- 타이틀 자리의 오늘의 사자성어. 글자와 뜻은 idioms.js에서 골라 JS가 채운다.
+    <!-- 타이틀 자리의 오늘 정보. 종류와 내용은 JS가 채운다.
          말풍선을 h1 밖에 두는 이유: h1은 말줄임 때문에 overflow가 막혀 있어
          안에 두면 말풍선이 잘린다. -->
     <div class="brand">
       <h1>
         <span aria-hidden="true">📝</span>
-        <span class="idiom-label">사자성어</span>
+        <select id="daily-type" class="daily-type" aria-label="오늘의 정보 선택">
+          <option value="idiom">사자성어</option>
+          <option value="quote">명언</option>
+          <option value="date">날짜</option>
+        </select>
         <a id="idiom" class="idiom" href="https://hanja.dict.naver.com/#/main"
            target="_blank" rel="noopener" aria-describedby="idiom-tip">適者生存</a>
       </h1>
@@ -116,6 +120,7 @@
   </template>
 
   <script src="idioms.js"></script>
+  <script src="quotes.js"></script>
   <script src="sidepanel.js"></script>
 </body>
 </html>
