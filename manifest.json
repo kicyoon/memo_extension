@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
   "name": "포스트잇 메모장",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "브라우저 오른쪽에 고정되는 포스트잇 스타일 메모장",
   "permissions": ["storage", "sidePanel", "alarms", "notifications", "offscreen"],
+  "host_permissions": ["https://stock.naver.com/*"],
   "background": {
     "service_worker": "background.js"
   },

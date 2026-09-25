@@ -31,6 +31,7 @@ const FORMAT_SHORTCUTS = { KeyB: "bold", KeyI: "italic", KeyU: "underline" };
 const STORAGE_KEY = "notes";
 const THEME_KEY = "theme";
 const DAILY_TYPE_KEY = "dailyType";
+const DAILY_TYPES = ["idiom", "quote", "date", "kospi"];
 
 // 순환 순서 겸 유효값 목록.
 const THEMES = ["system", "light", "dark"];
@@ -517,7 +518,7 @@ function loadNotes() {
       ? result[THEME_KEY]
       : "system";
     applyTheme();
-    dailyType = ["idiom", "quote", "date"].includes(result[DAILY_TYPE_KEY])
+    dailyType = DAILY_TYPES.includes(result[DAILY_TYPE_KEY])
       ? result[DAILY_TYPE_KEY]
       : "idiom";
     dailyTypeSelect.value = dailyType;
@@ -626,7 +627,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
   if (changes[DAILY_TYPE_KEY]) {
     const incomingType = changes[DAILY_TYPE_KEY].newValue;
-    if (["idiom", "quote", "date"].includes(incomingType) && incomingType !== dailyType) {
+    if (DAILY_TYPES.includes(incomingType) && incomingType !== dailyType) {
       dailyType = incomingType;
       dailyTypeSelect.value = dailyType;
       showDailyInfo();
@@ -1113,10 +1114,12 @@ listEl.addEventListener("drop", (e) => {
 const IDIOM_SEARCH_URL = "https://hanja.dict.naver.com/#/search?range=all&query=";
 const NAVER_SEARCH_URL =
   "https://search.naver.com/search.naver?sm=tab_hty.top&where=nexearch&ssc=tab.nx.all&query=";
+const KOSPI_URL = "https://stock.naver.com/domestic/index/KOSPI/price";
 const IDIOM_DAY_STEP = 7919;
 const idiomLink = document.getElementById("idiom");
 const dailyTypeSelect = document.getElementById("daily-type");
 let idiomRefreshTimer;
+let kospiRefreshTimer;
 
 function localDayNumber(now) {
   const localNow = now.getTime() - now.getTimezoneOffset() * 60000;
@@ -1131,16 +1134,79 @@ function todaysQuote(now = new Date()) {
   return QUOTES[(localDayNumber(now) * IDIOM_DAY_STEP) % QUOTES.length];
 }
 
+function signedKospiValue(value, changeType, { positiveSign = false } = {}) {
+  const clean = String(value || "0").replace(/^[+-]/, "");
+  if (changeType === "FALLING") return `-${clean}`;
+  if (changeType === "RISING" && positiveSign) return `+${clean}`;
+  return clean;
+}
+
+function renderKospi(result, reading) {
+  const isRising = result.changeType === "RISING";
+  const isFalling = result.changeType === "FALLING";
+  const direction = isRising ? "▲" : isFalling ? "▼" : "―";
+  const change = String(result.change || "0").replace(/^[+-]/, "");
+  const ratio = signedKospiValue(result.ratio, result.changeType, {
+    positiveSign: true,
+  });
+  const changeText = `${direction} ${change} (${ratio}%)`;
+
+  idiomLink.replaceChildren(
+    document.createTextNode(`${result.closePrice} `),
+    Object.assign(document.createElement("span"), {
+      className: isRising ? "kospi-rise" : isFalling ? "kospi-fall" : "kospi-flat",
+      textContent: changeText,
+    })
+  );
+  reading.textContent = `${result.closePrice} ${changeText}`;
+  reading.classList.toggle("kospi-rise", isRising);
+  reading.classList.toggle("kospi-fall", isFalling);
+  reading.classList.toggle("kospi-flat", !isRising && !isFalling);
+}
+
+function loadKospi() {
+  chrome.runtime.sendMessage({ type: "get-kospi" }, (result) => {
+    if (dailyType !== "kospi") return;
+
+    const reading = document.getElementById("idiom-reading");
+    const meaning = document.getElementById("idiom-meaning");
+    if (chrome.runtime.lastError || !result?.ok) {
+      idiomLink.textContent = "코스피 정보를 불러오지 못했습니다";
+      reading.textContent = "코스피 정보를 불러오지 못했습니다";
+      reading.classList.remove("kospi-rise", "kospi-fall", "kospi-flat");
+      meaning.textContent = "잠시 후 자동으로 다시 시도합니다";
+    } else {
+      renderKospi(result, reading);
+      meaning.textContent = result.changeText || "보합";
+    }
+
+    clearTimeout(kospiRefreshTimer);
+    if (document.visibilityState === "visible") {
+      kospiRefreshTimer = setTimeout(loadKospi, 60000);
+    }
+  });
+}
+
 function showDailyInfo() {
   const now = new Date();
   const tipTitle = document.querySelector(".idiom-tip-title");
   const reading = document.getElementById("idiom-reading");
   const meaning = document.getElementById("idiom-meaning");
   const hint = document.querySelector(".idiom-hint");
+  clearTimeout(kospiRefreshTimer);
+  reading.classList.remove("kospi-rise", "kospi-fall", "kospi-flat");
   idiomLink.classList.toggle("is-date", dailyType === "date");
   idiomLink.setAttribute("aria-disabled", dailyType === "date" ? "true" : "false");
 
-  if (dailyType === "quote") {
+  if (dailyType === "kospi") {
+    idiomLink.textContent = "코스피 불러오는 중…";
+    idiomLink.href = KOSPI_URL;
+    tipTitle.textContent = "코스피 현재 지수";
+    reading.textContent = "시세를 불러오고 있습니다";
+    meaning.textContent = "";
+    hint.textContent = "클릭하면 네이버 증권에서 보기";
+    loadKospi();
+  } else if (dailyType === "quote") {
     const quote = todaysQuote(now);
     idiomLink.textContent = quote.text;
     idiomLink.href =

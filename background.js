@@ -128,6 +128,44 @@ chrome.runtime.onMessage.addListener((message) => {
   }
 });
 
+// 사이드패널이 직접 외부 서버를 호출하지 않도록 서비스 워커가 코스피 시세를
+// 가져온다. 네이버 증권 페이지가 실제로 사용하는 공개 JSON 응답이다.
+const KOSPI_API_URL =
+  "https://stock.naver.com/api/securityFe/api/index/KOSPI/basic";
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (!message || message.type !== "get-kospi") return;
+
+  fetch(KOSPI_API_URL)
+    .then((response) => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json();
+    })
+    .then((data) => {
+      if (
+        typeof data.closePrice !== "string" ||
+        typeof data.compareToPreviousClosePrice !== "string" ||
+        typeof data.fluctuationsRatio !== "string"
+      ) {
+        throw new Error("코스피 응답 형식이 올바르지 않습니다");
+      }
+      sendResponse({
+        ok: true,
+        closePrice: data.closePrice,
+        change: data.compareToPreviousClosePrice,
+        changeType: data.compareToPreviousPrice?.name,
+        changeText: data.compareToPreviousPrice?.text,
+        ratio: data.fluctuationsRatio,
+        marketStatus: data.marketStatus,
+        tradedAt: data.localTradedAt,
+      });
+    })
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
+
+  // 비동기 fetch가 끝난 뒤에도 sendResponse 채널을 유지한다.
+  return true;
+});
+
 chrome.notifications.onClicked.addListener((notificationId) => {
   chrome.notifications.clear(notificationId);
 });

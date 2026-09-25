@@ -157,6 +157,19 @@ body {
   outline-offset: 1px;
 }
 
+/* 국내 증권 화면의 관례에 맞춰 상승은 빨강, 하락은 파랑으로 구분한다. */
+.kospi-rise {
+  color: #e53935;
+}
+
+.kospi-fall {
+  color: #1976d2;
+}
+
+.kospi-flat {
+  color: var(--muted);
+}
+
 /* 마우스를 올리거나 키보드로 포커스하면 한글음과 뜻을 보여 준다. 말풍선
    위에서는 클릭이 링크로 가도록 pointer-events를 끈다. */
 .idiom-tip {
