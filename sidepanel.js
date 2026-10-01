@@ -79,6 +79,29 @@ let notes = [];
 let themeSetting = "system";
 let dailyType = "idiom";
 const saveTimers = new Map();
+const footerResizeObserver = new ResizeObserver((entries) => {
+  entries.forEach(({ target }) => fitNoteFooter(target));
+});
+
+function fitNoteFooter(footer) {
+  const date = footer.querySelector(".note-date");
+  const fullDate = date.dataset.fullDate;
+  if (!fullDate) return;
+  date.textContent = fullDate;
+  const swatches = footer.querySelector(".color-swatches");
+  const meta = footer.querySelector(".note-meta");
+  const gap = parseFloat(getComputedStyle(footer).columnGap) || 0;
+  const requiredWidth = () => swatches.scrollWidth + meta.getBoundingClientRect().width + gap;
+  if (requiredWidth() > footer.clientWidth) {
+    // 오른쪽 시간은 남기고 연도부터 한 글자씩 줄인다. 최소 표시는 ....이다.
+    let suffix = fullDate.replace(/^\d{4}\./, "");
+    date.textContent = `....${suffix}`;
+    while (suffix && requiredWidth() > footer.clientWidth) {
+      suffix = suffix.slice(1);
+      date.textContent = `....${suffix}`;
+    }
+  }
+}
 
 // 각 메모의 contentArea(DOM)에서 그 메모의 bindEditableField().commit을
 // 곧장 찾기 위한 표. 글씨체 팝오버는 어떤 메모를 편집 중이었는지 모르는
@@ -372,10 +395,41 @@ function runToHtml(r) {
   return html;
 }
 
+// URL은 저장된 글자에서 생성하고 외부 HTML의 링크 속성은 신뢰하지 않는다.
+function linkedRunsToHtml(runs) {
+  const text = runs.map((r) => r.text).join("");
+  const matches = [...text.matchAll(/https?:\/\/[^\s<>"']+/gi)];
+  let offset = 0;
+  return runs.map((run) => {
+    const start = offset;
+    offset += run.text.length;
+    let cursor = start;
+    let html = "";
+    for (const match of matches) {
+      let url = match[0].replace(/[.,!?;:]+$/, "");
+      // 문장 끝의 닫는 괄호는 URL 안에서 짝이 맞는 경우만 포함한다.
+      for (const [open, close] of [["(", ")"], ["[", "]"], ["{", "}"]]) {
+        while (url.endsWith(close) && url.split(close).length > url.split(open).length) {
+          url = url.slice(0, -1);
+        }
+      }
+      try { if (!new URL(url).hostname) continue; } catch { continue; }
+      const left = Math.max(start, match.index);
+      const right = Math.min(offset, match.index + url.length);
+      if (left >= right) continue;
+      html += runToHtml({ ...run, text: text.slice(cursor, left) });
+      const href = escapeHtml(url).replace(/"/g, "&quot;");
+      html += `<a href="${href}" target="_blank" rel="noopener noreferrer" title="새 탭에서 열기">${runToHtml({ ...run, text: text.slice(left, right) })}</a>`;
+      cursor = right;
+    }
+    return html + runToHtml({ ...run, text: text.slice(cursor, offset) });
+  }).join("");
+}
+
 function linesToHtml(lines) {
   return lines
     .map((runs) => {
-      const inner = runs.length ? runs.map(runToHtml).join("") : "<br>";
+      const inner = runs.length ? linkedRunsToHtml(runs) : "<br>";
       return `<div>${inner}</div>`;
     })
     .join("");
@@ -655,6 +709,18 @@ chrome.storage.onChanged.addListener((changes, area) => {
  * ------------------------------------------------------------------ */
 
 // <input type="datetime-local">은 "YYYY-MM-DDTHH:mm"(지역 시각)을 주고받는다.
+const REMINDER_REPEATS = { none: "반복 안 함", daily: "매일", weekly: "매주", monthly: "매월" };
+
+function reminderRepeatDescription(note) {
+  if (!note || !Number.isFinite(note.remindAt)) return "시각 선택 후 반복 기준 표시";
+  const anchor = new Date(Number.isFinite(note.remindAnchor) ? note.remindAnchor : note.remindAt);
+  const time = `${String(anchor.getHours()).padStart(2, "0")}:${String(anchor.getMinutes()).padStart(2, "0")}`;
+  if (note.remindRepeat === "daily") return `매일 ${time}`;
+  if (note.remindRepeat === "weekly") return `매주 ${["일", "월", "화", "수", "목", "금", "토"][anchor.getDay()]}요일 ${time}`;
+  if (note.remindRepeat === "monthly") return `매월 ${note.remindDay || anchor.getDate()}일 ${time} (해당 날짜가 없는 달은 마지막 날)`;
+  return "반복 없이 한 번 알립니다.";
+}
+
 function toLocalInput(ts) {
   const d = new Date(ts);
   const pad = (n) => String(n).padStart(2, "0");
@@ -677,22 +743,31 @@ function paintReminder(noteEl, note) {
   const isSet = Number.isFinite(remindAt);
   // 소리는 켜짐이 기본이라, 값이 없는 메모도 켜진 것으로 본다.
   const muted = !!note && note.remindSound === false;
+  const repeat = note && REMINDER_REPEATS[note.remindRepeat] ? note.remindRepeat : "none";
+  const repeatLabel = repeat === "none" ? "" : ` · ${REMINDER_REPEATS[repeat]}`;
+  const timingLabel = note && note.remindBefore === 5 ? " · 5분 전" : "";
   const box = noteEl.querySelector(".note-reminder");
   const btn = box.querySelector(".note-reminder-btn");
   box.classList.toggle("is-set", isSet);
   box.classList.toggle("is-muted", muted);
   box.querySelector(".note-reminder-text").textContent = isSet
-    ? formatReminder(remindAt)
+    ? formatReminder(remindAt) + timingLabel + repeatLabel
     : "";
   box.querySelector(".note-reminder-input").value = isSet ? toLocalInput(remindAt) : "";
   box.querySelector(".note-reminder-sound").checked = !muted;
+  box.querySelector(".note-reminder-repeat").value = repeat;
+  box.querySelector(".note-reminder-repeat-description").textContent = reminderRepeatDescription(note);
+  box.querySelector(".note-reminder-timing").value = note && note.remindBefore === 5 ? "5" : "0";
   box.querySelector(".note-reminder-clear").disabled = !isSet;
 
   const label = isSet
-    ? `알림 ${formatReminder(remindAt)}${muted ? ", 소리 꺼짐" : ""} (눌러서 설정)`
+    ? `알림 ${formatReminder(remindAt)}${timingLabel}${repeatLabel}${muted ? ", 소리 꺼짐" : ""} (눌러서 설정)`
     : "알림 설정";
   btn.title = label;
   btn.setAttribute("aria-label", label);
+  requestAnimationFrame(() => {
+    if (noteEl.isConnected) fitNoteFooter(noteEl.querySelector(".note-footer"));
+  });
 }
 
 // 편집 중이라 render()를 건너뛴 사이 바깥(백그라운드)에서 알림이 소진되는
@@ -704,8 +779,32 @@ function syncReminderButtons() {
   });
 }
 
+function positionReminderPopover(box) {
+  const popover = box.querySelector(".note-reminder-popover");
+  if (popover.hidden) return;
+  const bounds = listEl.getBoundingClientRect();
+  const anchor = box.getBoundingClientRect();
+  const gap = 6;
+  const above = Math.max(0, anchor.top - Math.max(0, bounds.top) - gap);
+  const below = Math.max(0, Math.min(window.innerHeight, bounds.bottom) - anchor.bottom - gap);
+  // 위 공간이 부족하면 아래로 열고, 양쪽 모두 좁으면 넓은 쪽에서 스크롤한다.
+  const openBelow = popover.scrollHeight > above && below > above;
+  popover.style.top = openBelow ? "calc(100% + 6px)" : "auto";
+  popover.style.bottom = openBelow ? "auto" : "calc(100% + 6px)";
+  popover.style.maxHeight = `${openBelow ? below : above}px`;
+}
+
+function repositionReminderPopovers() {
+  listEl.querySelectorAll(".note-reminder").forEach(positionReminderPopover);
+}
+
+listEl.addEventListener("scroll", repositionReminderPopovers, { passive: true });
+window.addEventListener("resize", repositionReminderPopovers);
+
 function setReminderPopoverOpen(box, open) {
-  box.querySelector(".note-reminder-popover").hidden = !open;
+  const popover = box.querySelector(".note-reminder-popover");
+  popover.hidden = !open;
+  if (open) positionReminderPopover(box);
   box.querySelector(".note-reminder-btn").setAttribute("aria-expanded", String(open));
 }
 
@@ -721,6 +820,8 @@ function bindReminder(noteEl, note) {
   const popover = box.querySelector(".note-reminder-popover");
   const input = box.querySelector(".note-reminder-input");
   const soundBox = box.querySelector(".note-reminder-sound");
+  const repeatSelect = box.querySelector(".note-reminder-repeat");
+  const timingSelect = box.querySelector(".note-reminder-timing");
   const clearBtn = box.querySelector(".note-reminder-clear");
 
   // 이 클로저의 note는 storage.onChanged가 notes를 갈아치우면 낡은 객체가
@@ -745,12 +846,28 @@ function bindReminder(noteEl, note) {
   input.addEventListener("change", () => {
     const ts = input.value ? new Date(input.value).getTime() : NaN;
     if (!Number.isFinite(ts)) {
-      updateNote(note.id, { remindAt: null });
-    } else if (ts <= Date.now()) {
+      updateNote(note.id, { remindAt: null, remindRepeat: "none", remindDay: null, remindAnchor: null });
+    } else if (ts - Number(timingSelect.value) * 60000 <= Date.now()) {
       // 같은 날 이미 지난 시각은 min으로 다 걸러지지 않는다.
-      alert("지난 시각에는 알림을 걸 수 없어요.");
+      alert("실제 알림이 울릴 시각을 현재보다 나중으로 설정해 주세요.");
     } else {
-      updateNote(note.id, { remindAt: ts });
+      updateNote(note.id, { remindAt: ts, remindAnchor: ts, remindDay: new Date(ts).getDate() });
+    }
+    repaint();
+  });
+
+  repeatSelect.addEventListener("change", () => {
+    updateNote(note.id, { remindRepeat: repeatSelect.value });
+    repaint();
+  });
+
+  timingSelect.addEventListener("change", () => {
+    const current = notes.find((n) => n.id === note.id);
+    const before = Number(timingSelect.value);
+    if (current && Number.isFinite(current.remindAt) && current.remindAt - before * 60000 <= Date.now()) {
+      alert("실제 알림이 울릴 시각을 현재보다 나중으로 설정해 주세요.");
+    } else {
+      updateNote(note.id, { remindBefore: before });
     }
     repaint();
   });
@@ -761,7 +878,7 @@ function bindReminder(noteEl, note) {
   });
 
   clearBtn.addEventListener("click", () => {
-    updateNote(note.id, { remindAt: null });
+    updateNote(note.id, { remindAt: null, remindRepeat: "none", remindDay: null, remindAnchor: null });
     repaint();
   });
 }
@@ -859,6 +976,7 @@ function bindEditableField(el, note, field, onAfterChange) {
     focused = false;
     // blur 시점의 값은 조합 중이던 글자까지 온전히 담고 있다(실측).
     lastGoodValue = fieldValue(el);
+    if (el.isContentEditable) setFieldValue(el, lastGoodValue);
     updateNote(note.id, { [field]: lastGoodValue });
     // 조합 정리로 DOM이 건드려진 건 위 revertIfStray가 되돌린다. 이 rAF는
     // 그걸로도 안 잡힌 어긋남이 남았을 때만 도는 마지막 안전망이다.
@@ -895,6 +1013,8 @@ function createNoteElement(note) {
   titleInput.value = note.title;
   setFieldValue(contentArea, contentHtml(note));
   dateEl.textContent = formatDate(note.updatedAt);
+  dateEl.dataset.fullDate = dateEl.textContent;
+  dateEl.title = dateEl.textContent;
 
   titleInput.addEventListener("focus", () => {
     titleInput.spellcheck = true;
@@ -921,6 +1041,12 @@ function createNoteElement(note) {
   );
   // 글씨체 팝오버가 이 메모의 commit을 찾을 수 있도록 등록해 둔다.
   contentFieldByArea.set(contentArea, contentField);
+  contentArea.addEventListener("click", (e) => {
+    const link = e.target.closest("a");
+    if (!link || !contentArea.contains(link)) return;
+    e.preventDefault();
+    chrome.tabs.create({ url: link.href });
+  });
 
   // Ctrl+B/I/U(맥은 ⌘)로 선택한 글자에 굵게/기울임/밑줄을 건다. e.code(물리
   // 키 위치)를 기준으로 삼는 이유는 한글 입력 상태에서 e.key가 자판 위치가
@@ -1045,11 +1171,16 @@ function render() {
       ? { offset: caretOffset(active) }
       : null;
 
+  footerResizeObserver.disconnect();
   listEl.innerHTML = "";
   emptyStateEl.hidden = notes.length > 0;
 
   notes.forEach((note) => {
     listEl.appendChild(createNoteElement(note));
+  });
+  listEl.querySelectorAll(".note-footer").forEach((footer) => {
+    fitNoteFooter(footer);
+    footerResizeObserver.observe(footer);
   });
 
   // 패널이 포커스를 갖고 있지 않은데 focus()를 부르면, 사용자가 브라우저

@@ -107,6 +107,23 @@
                 <span>알림 시각</span>
                 <input type="datetime-local" class="note-reminder-input" />
               </label>
+              <label class="reminder-field">
+                <span>알림 시점</span>
+                <select class="note-reminder-timing note-reminder-input">
+                  <option value="0">정각</option>
+                  <option value="5">5분 전</option>
+                </select>
+              </label>
+              <label class="reminder-field">
+                <span>반복</span>
+                <select class="note-reminder-repeat note-reminder-input">
+                  <option value="none">반복 안 함</option>
+                  <option value="daily">매일</option>
+                  <option value="weekly">매주</option>
+                  <option value="monthly">매월</option>
+                </select>
+                <span class="note-reminder-repeat-description" aria-live="polite"></span>
+              </label>
               <label class="reminder-row">
                 <input type="checkbox" class="note-reminder-sound" checked />
                 <span>알림 소리</span>

@@ -14,6 +14,10 @@ chrome.sidePanel
 const STORAGE_KEY = "notes";
 const ALARM_PREFIX = "note:";
 
+function reminderOffset(note) {
+  return note.remindBefore === 5 ? 5 * 60000 : 0;
+}
+
 // remindAt이 있는 메모만 알람이 있게 맞춘다(추가·변경·삭제 모두 이 한 함수로).
 // 과거 시각으로 create하면 곧바로 울리므로, 브라우저가 꺼져 있던 사이에 놓친
 // 알림도 다음 시작 때 한 번 울린다.
@@ -23,7 +27,7 @@ async function syncAlarms() {
   const wanted = new Map(
     notes
       .filter((n) => Number.isFinite(n.remindAt))
-      .map((n) => [ALARM_PREFIX + n.id, n.remindAt])
+      .map((n) => [ALARM_PREFIX + n.id, n.remindAt - reminderOffset(n)])
   );
 
   const existing = await chrome.alarms.getAll();
@@ -58,6 +62,30 @@ function notePreview(note) {
   return text.length > 120 ? text.slice(0, 120) + "…" : text;
 }
 
+// 지역 시각을 유지하고, 매월 29~31일은 해당 월의 마지막 날로 맞춘다.
+function nextReminder(note, now = Date.now()) {
+  if (!["daily", "weekly", "monthly"].includes(note.remindRepeat)) return null;
+  const anchor = new Date(Number.isFinite(note.remindAnchor) ? note.remindAnchor : note.remindAt);
+  const next = new Date(now);
+  next.setHours(anchor.getHours(), anchor.getMinutes(), anchor.getSeconds(), anchor.getMilliseconds());
+  if (note.remindRepeat === "monthly") {
+    const day = note.remindDay || anchor.getDate();
+    next.setDate(1);
+    next.setDate(Math.min(day, new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()));
+    if (next.getTime() <= now) {
+      next.setDate(1);
+      next.setMonth(next.getMonth() + 1);
+      next.setDate(Math.min(day, new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()));
+    }
+  } else if (note.remindRepeat === "weekly") {
+    next.setDate(next.getDate() + (anchor.getDay() - next.getDay() + 7) % 7);
+    if (next.getTime() <= now) next.setDate(next.getDate() + 7);
+  } else if (next.getTime() <= now) {
+    next.setDate(next.getDate() + 1);
+  }
+  return next.getTime();
+}
+
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (!alarm.name.startsWith(ALARM_PREFIX)) return;
   const id = alarm.name.slice(ALARM_PREFIX.length);
@@ -67,13 +95,20 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   const note = notes.find((n) => n.id === id);
   // 그 사이 메모가 지워졌거나 알림 시각이 바뀌었다면(더 늦게 옮긴 경우 등)
   // 이 알람은 낡은 것이다.
-  if (!note || !Number.isFinite(note.remindAt) || note.remindAt > Date.now() + 1000) {
+  if (!note || !Number.isFinite(note.remindAt) || note.remindAt - reminderOffset(note) > Date.now() + 1000) {
     return;
   }
 
-  // 알림은 한 번만 울리므로 먼저 소진 처리한다.
-  delete note.remindAt;
+  // 놓친 반복 알림은 한 번만 알리고 다음 미래 시각으로 넘긴다.
+  if (!Number.isFinite(note.remindAnchor)) note.remindAnchor = note.remindAt;
+  const next = nextReminder(note, Date.now() + reminderOffset(note));
+  if (next === null) delete note.remindAt;
+  else {
+    if (!note.remindDay) note.remindDay = new Date(note.remindAt).getDate();
+    note.remindAt = next;
+  }
   await chrome.storage.local.set({ [STORAGE_KEY]: notes });
+  await syncAlarms();
 
   chrome.notifications.create(`${ALARM_PREFIX}${id}:${Date.now()}`, {
     type: "basic",
