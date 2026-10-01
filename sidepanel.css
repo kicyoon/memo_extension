@@ -714,6 +714,31 @@ body {
   white-space: nowrap;
 }
 
+.format-size-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+#font-size-select {
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--tip-border);
+  border-radius: 6px;
+  background: var(--tip-bg);
+  color: var(--tip-fg);
+  font: inherit;
+}
+
+#font-size-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+#font-size-select:disabled { opacity: 0.45; }
+
 .note-reminder-btn { white-space: nowrap; }
 
 .note-reminder { flex-shrink: 0; }

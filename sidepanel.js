@@ -108,6 +108,53 @@ function fitNoteFooter(footer) {
 // 채로 시작하므로, 이 표가 없으면 서식을 건 뒤 저장할 방법이 없다.
 const contentFieldByArea = new WeakMap();
 
+const NOTE_FONT_SIZES = [10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32];
+const DEFAULT_NOTE_FONT_SIZE = 13;
+const pendingFontSizes = new WeakMap();
+
+function elementFontSize(el) {
+  const px = el.style && /^([\d.]+)px$/.exec(el.style.fontSize);
+  if (px && NOTE_FONT_SIZES.includes(Number(px[1]))) return Number(px[1]);
+  const legacy = el.tagName === "FONT" && Number(el.getAttribute("size"));
+  return legacy >= 1 && legacy <= 7 ? [10, 13, 16, 18, 24, 28, 32][legacy - 1] : null;
+}
+
+function normalizePendingFontSize(area) {
+  const size = pendingFontSizes.get(area);
+  if (!size) return;
+  area.querySelectorAll('font[size="7"]').forEach((font) => {
+    font.removeAttribute("size");
+    font.style.fontSize = `${size}px`;
+  });
+}
+
+function caretFontSize(area) {
+  const sel = window.getSelection();
+  if (!sel?.rangeCount) return noteFontSize(notes.find((n) => n.id === area.closest(".note").dataset.id));
+  if (sel.isCollapsed && document.queryCommandValue("fontSize") === "7" && pendingFontSizes.has(area)) {
+    return pendingFontSizes.get(area);
+  }
+  let node = sel.getRangeAt(0).startContainer;
+  if (node.nodeType === Node.TEXT_NODE) node = node.parentElement;
+  while (node && node !== area && area.contains(node)) {
+    const size = elementFontSize(node);
+    if (size) return size;
+    node = node.parentElement;
+  }
+  return noteFontSize(notes.find((n) => n.id === area.closest(".note").dataset.id));
+}
+
+function noteFontSize(note) {
+  return note && NOTE_FONT_SIZES.includes(note.fontSize) ? note.fontSize : DEFAULT_NOTE_FONT_SIZE;
+}
+
+function paintNoteFontSize(noteEl, note) {
+  const area = noteEl.querySelector(".note-content");
+  const size = noteFontSize(note);
+  area.style.fontSize = `${size}px`;
+  area.style.minHeight = `${size * 3 + 8}px`;
+}
+
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
@@ -298,6 +345,7 @@ function htmlToLines(root) {
   // 굵게/기울임/밑줄과 달리 색은 단순 on/off가 아니라 값이라 depth 대신
   // 스택을 쓴다. 지금 유효한 색은 항상 스택 맨 위(가장 안쪽 <font>) 값이다.
   const colorStack = [];
+  const sizeStack = [];
   // "지금 줄이 시작되긴 했다"는 표시. 글자가 하나도 없는 마지막 빈 줄을
   // 살리는 데 쓴다 — filler <br>만 있는 줄은 run이 비어 있어서, 이 표시가
   // 없으면 마지막에 통째로 버려진다.
@@ -315,17 +363,19 @@ function htmlToLines(root) {
     const italic = italicDepth > 0;
     const underline = underlineDepth > 0;
     const color = colorStack.length ? colorStack[colorStack.length - 1] : null;
+    const fontSize = sizeStack.length ? sizeStack[sizeStack.length - 1] : null;
     const last = run[run.length - 1];
     if (
       last &&
       last.bold === bold &&
       last.italic === italic &&
       last.underline === underline &&
-      last.color === color
+      last.color === color &&
+      last.fontSize === fontSize
     ) {
       last.text += text;
     } else {
-      run.push({ text, bold, italic, underline, color });
+      run.push({ text, bold, italic, underline, color, fontSize });
     }
     lineOpen = true;
   };
@@ -356,15 +406,18 @@ function htmlToLines(root) {
       const italic = isItalicElement(child);
       const underline = isUnderlineElement(child);
       const color = elementColor(child);
+      const fontSize = elementFontSize(child);
       if (bold) boldDepth++;
       if (italic) italicDepth++;
       if (underline) underlineDepth++;
       if (color) colorStack.push(color);
+      if (fontSize) sizeStack.push(fontSize);
       walk(child);
       if (bold) boldDepth--;
       if (italic) italicDepth--;
       if (underline) underlineDepth--;
       if (color) colorStack.pop();
+      if (fontSize) sizeStack.pop();
 
       if (isBlock) endLine();
     });
@@ -388,6 +441,7 @@ function linesToText(lines) {
 // 항상 같은 모양으로 나온다.
 function runToHtml(r) {
   let html = escapeHtml(r.text);
+  if (NOTE_FONT_SIZES.includes(r.fontSize)) html = `<span style="font-size:${r.fontSize}px">${html}</span>`;
   if (r.underline) html = `<u>${html}</u>`;
   if (r.italic) html = `<i>${html}</i>`;
   if (r.bold) html = `<b>${html}</b>`;
@@ -664,7 +718,9 @@ function domDivergesFromNotes() {
 function isEditingAnyNote() {
   if (!document.hasFocus()) return false;
   const active = document.activeElement;
-  return !!(active && active.closest && active.closest(".note"));
+  return !!(active && active.closest && (
+    active.closest(".note") || active.closest(".format-menu")
+  ));
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -695,6 +751,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
     // 편집 중에는 통째로 다시 그리지 않는다. 알림이 울려서 지워진 경우처럼
     // 바깥에서 바뀐 알림 시각만 화면에 맞춰 준다.
     syncReminderButtons();
+    listEl.querySelectorAll(".note").forEach((noteEl) => {
+      paintNoteFontSize(noteEl, notes.find((n) => n.id === noteEl.dataset.id));
+    });
+    refreshFormatState();
     return;
   }
   notes = incoming;
@@ -972,11 +1032,13 @@ function bindEditableField(el, note, field, onAfterChange) {
     updateNote(note.id, { [field]: lastGoodValue }, { debounce: true });
   });
 
-  el.addEventListener("blur", () => {
+  el.addEventListener("blur", (e) => {
     focused = false;
     // blur 시점의 값은 조합 중이던 글자까지 온전히 담고 있다(실측).
     lastGoodValue = fieldValue(el);
-    if (el.isContentEditable) setFieldValue(el, lastGoodValue);
+    // 서식 메뉴로 이동할 때 innerHTML을 바꾸면 저장된 Range가 무효화된다.
+    const enteringFormatMenu = !!e.relatedTarget?.closest?.(".format-menu");
+    if (el.isContentEditable && !enteringFormatMenu) setFieldValue(el, lastGoodValue);
     updateNote(note.id, { [field]: lastGoodValue });
     // 조합 정리로 DOM이 건드려진 건 위 revertIfStray가 되돌린다. 이 rAF는
     // 그걸로도 안 잡힌 어긋남이 남았을 때만 도는 마지막 안전망이다.
@@ -1012,6 +1074,7 @@ function createNoteElement(note) {
   paintNote(noteEl, note.color);
   titleInput.value = note.title;
   setFieldValue(contentArea, contentHtml(note));
+  paintNoteFontSize(noteEl, note);
   dateEl.textContent = formatDate(note.updatedAt);
   dateEl.dataset.fullDate = dateEl.textContent;
   dateEl.title = dateEl.textContent;
@@ -1036,9 +1099,10 @@ function createNoteElement(note) {
   contentArea.addEventListener("blur", () => {
     contentArea.spellcheck = false;
   });
-  const contentField = bindEditableField(contentArea, note, "content", () =>
-    refreshBlankState(contentArea)
-  );
+  const contentField = bindEditableField(contentArea, note, "content", () => {
+    normalizePendingFontSize(contentArea);
+    refreshBlankState(contentArea);
+  });
   // 글씨체 팝오버가 이 메모의 commit을 찾을 수 있도록 등록해 둔다.
   contentFieldByArea.set(contentArea, contentField);
   contentArea.addEventListener("click", (e) => {
@@ -1409,8 +1473,23 @@ const formatBtn = document.getElementById("format-btn");
 const formatIcon = formatBtn.querySelector(".format-icon");
 const formatPopover = document.getElementById("format-popover");
 const formatColorsEl = formatPopover.querySelector(".format-colors");
+const fontSizeSelect = document.getElementById("font-size-select");
+let fontSizeNoteId = null;
+
+function fontSizeTargetNote() {
+  const active = document.activeElement;
+  const noteEl = active?.closest?.(".note");
+  if (noteEl) fontSizeNoteId = noteEl.dataset.id;
+  return notes.find((note) => note.id === fontSizeNoteId) || null;
+}
 
 let savedSelection = null; // { area, range } — 포커스가 note-content를 벗어나기 직전의 선택 영역
+
+function rememberContentSelection(area, selection) {
+  const range = selection.getRangeAt(0).cloneRange();
+  if (!area.contains(range.startContainer) || !area.contains(range.endContainer)) return;
+  savedSelection = { area, range, text: range.toString(), collapsed: range.collapsed };
+}
 
 function focusedContentArea() {
   const el = document.activeElement;
@@ -1456,6 +1535,13 @@ function caretColor(area) {
 // 입력 중"이라는 표시로 남도록, 팝오버가 열려 있는지와 무관하게 매번
 // 갱신한다.
 function refreshFormatState() {
+  const sizeNote = fontSizeTargetNote();
+  const sizeArea = focusedContentArea() || (savedSelection?.area.isConnected && savedSelection.area.closest(".note").dataset.id === sizeNote?.id ? savedSelection.area : null);
+  fontSizeSelect.disabled = !sizeArea;
+  // 선택 메뉴 조작 중에는 selectionchange로 미확정 값을 되돌리지 않는다.
+  if (document.activeElement !== fontSizeSelect) {
+    fontSizeSelect.value = String(sizeArea ? caretFontSize(sizeArea) : DEFAULT_NOTE_FONT_SIZE);
+  }
   const area = focusedContentArea();
   const bold = !!area && document.queryCommandState("bold");
   const italic = !!area && document.queryCommandState("italic");
@@ -1506,6 +1592,8 @@ function removeSelectionColor() {
 function restoreSavedSelection() {
   if (!savedSelection || !document.contains(savedSelection.area)) return null;
   const { area, range } = savedSelection;
+  if (!area.contains(range.startContainer) || !area.contains(range.endContainer)) return null;
+  if (range.collapsed !== savedSelection.collapsed || range.toString() !== savedSelection.text) return null;
   area.focus();
   const sel = window.getSelection();
   sel.removeAllRanges();
@@ -1573,8 +1661,28 @@ formatBtn.addEventListener("click", () => {
 });
 
 formatPopover.addEventListener("mousedown", (e) => {
+  if (e.target.closest("#font-size-select")) {
+    const area = focusedContentArea();
+    const sel = window.getSelection();
+    if (area && sel?.rangeCount) {
+      rememberContentSelection(area, sel);
+    }
+    return;
+  }
   if (e.target.closest(".format-color-custom")) return; // 네이티브 색상 선택창은 포커스가 필요하다
   e.preventDefault();
+});
+
+fontSizeSelect.addEventListener("change", () => {
+  const fontSize = Number(fontSizeSelect.value);
+  if (!NOTE_FONT_SIZES.includes(fontSize)) return;
+  const area = restoreSavedSelection();
+  if (!area) return;
+  applyFormat(area, () => {
+    pendingFontSizes.set(area, fontSize);
+    document.execCommand("fontSize", false, "7");
+    normalizePendingFontSize(area);
+  });
 });
 
 formatPopover.querySelectorAll(".format-toggle").forEach((btn) => {
@@ -1594,7 +1702,7 @@ document.addEventListener("selectionchange", () => {
   const area = focusedContentArea();
   const sel = window.getSelection();
   if (area && sel && sel.rangeCount) {
-    savedSelection = { area, range: sel.getRangeAt(0).cloneRange() };
+    rememberContentSelection(area, sel);
   }
   refreshFormatState();
 });
